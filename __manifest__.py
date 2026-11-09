@@ -6,6 +6,7 @@
     "author": "KIO",
     "license": "LGPL-3",
     "depends": ["hr", "hr_attendance", "hr_contract", "account", "web"],
+    "post_init_hook": "_post_init_kio_payroll_overview_extension",
     "data": [
         "security/kio_payroll_security.xml",
         "security/ir.model.access.csv",

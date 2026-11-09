@@ -36,9 +36,16 @@
                     <group>
                         <group>
                             <field name="company_id" invisible="1"/>
-                            <field name="department_id" readonly="state == 'confirmed'"/>
+                            <field name="employee_scope" readonly="state == 'confirmed'"/>
+                            <field name="department_id" readonly="state == 'confirmed'"
+                                   invisible="employee_scope != 'department'"
+                                   required="employee_scope == 'department'"
+                                   options="{'no_create': True}"/>
                             <field name="employee_id" readonly="state == 'confirmed'"
-                                   domain="[('department_id', '=', department_id), ('active', '=', True)] if department_id else [('active', '=', True)]"/>
+                                   invisible="employee_scope != 'individual'"
+                                   required="employee_scope == 'individual'"
+                                   options="{'no_create': True}"
+                                   domain="[('company_id', '=', company_id), ('active', '=', True)]"/>
                             <field name="calculation_type" readonly="state == 'confirmed'"/>
                         </group>
                         <group>

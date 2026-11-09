@@ -17,6 +17,17 @@ class KioOvertimeConfiguration(models.Model):
         index=True,
         tracking=True,
     )
+    employee_scope = fields.Selection(
+        [
+            ("all", "All Employees"),
+            ("department", "Department"),
+            ("individual", "Individual Employee"),
+        ],
+        string="Employee Scope",
+        default="all",
+        required=True,
+        tracking=True,
+    )
     department_id = fields.Many2one(
         "hr.department",
         string="Department",
@@ -28,7 +39,7 @@ class KioOvertimeConfiguration(models.Model):
         string="Employee",
         tracking=True,
         check_company=True,
-        domain="[('department_id', '=', department_id)] if department_id else []",
+        domain="[('company_id', '=', company_id), ('active', '=', True), ('department_id', '=', department_id)] if department_id else [('company_id', '=', company_id), ('active', '=', True)]",
     )
     calculation_type = fields.Selection(
         [("fixed", "Fixed Amount"), ("percentage", "Percentage")],
@@ -71,7 +82,20 @@ class KioOvertimeConfiguration(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        records = super().create(vals_list)
+        normalized = []
+        for vals in vals_list:
+            vals = dict(vals)
+            # Safe default for existing/programmatic creates without explicit scope.
+            if not vals.get("employee_scope"):
+                if vals.get("employee_id"):
+                    vals["employee_scope"] = "individual"
+                elif vals.get("department_id"):
+                    vals["employee_scope"] = "department"
+                else:
+                    vals["employee_scope"] = "all"
+            vals = self._normalize_scope_vals(vals)
+            normalized.append(vals)
+        records = super().create(normalized)
         for rec in records:
             if not rec.name or rec.name == _("New"):
                 rec.name = "OTC/%05d" % rec.id
@@ -108,75 +132,122 @@ class KioOvertimeConfiguration(models.Model):
                     "Reset or change the conflicting configuration before confirming."
                 ) % conflicts.employee_id.display_name)
 
+    def _normalize_scope_vals(self, vals):
+        """Normalize Department/Employee values according to Employee Scope (draft-safe helper)."""
+        scope = vals.get("employee_scope")
+        if not scope:
+            return vals
+        vals = dict(vals)
+        if scope == "all":
+            vals.setdefault("department_id", False)
+            vals.setdefault("employee_id", False)
+            vals["department_id"] = False
+            vals["employee_id"] = False
+        elif scope == "department":
+            vals.setdefault("employee_id", False)
+            vals["employee_id"] = False
+        elif scope == "individual":
+            vals.setdefault("department_id", False)
+            vals["department_id"] = False
+        return vals
+
+    def _check_scope_requirements(self):
+        for rec in self:
+            if rec.employee_scope == "department" and not rec.department_id:
+                raise ValidationError(_("Please select a Department for Employee Scope 'Department'."))
+            if rec.employee_scope == "individual" and not rec.employee_id:
+                raise ValidationError(_("Please select an Employee for Employee Scope 'Individual Employee'."))
+
     def _employees_for_selection(self):
         self.ensure_one()
         company = self.company_id or self.env.company
-        domain = [("company_id", "=", company.id), ("active", "=", True)]
-        if self.department_id:
-            domain.append(("department_id", "=", self.department_id.id))
-        if self.employee_id:
-            return self.employee_id.filtered(lambda e: e.active and e.company_id == company and (not self.department_id or e.department_id == self.department_id))
-        if self.department_id:
-            return self.env["hr.employee"].search(domain, order="name")
-        return self.env["hr.employee"].browse()
+        Employee = self.env["hr.employee"]
+        base_domain = [("company_id", "=", company.id), ("active", "=", True)]
+        scope = self.employee_scope or "all"
 
-    def action_populate_lines(self):
+        if scope == "individual":
+            if not self.employee_id:
+                return Employee.browse()
+            return self.employee_id.filtered(lambda e: e.active and e.company_id == company)
+
+        if scope == "department":
+            if not self.department_id:
+                return Employee.browse()
+            base_domain.append(("department_id", "=", self.department_id.id))
+            return Employee.search(base_domain, order="name")
+
+        return Employee.search(base_domain, order="name")
+
+    def _refresh_lines_from_scope(self):
         for rec in self:
-            rec._check_draft()
+            if rec.state != "draft":
+                continue
             employees = rec._employees_for_selection()
-            existing = {line.employee_id.id: line for line in rec.line_ids}
+            existing = {}
+            for line in rec.line_ids:
+                emp_id = line.employee_id._origin.id or line.employee_id.id
+                if emp_id:
+                    existing[emp_id] = line
             commands = [(5, 0, 0)]
             for emp in employees:
-                old = existing.get(emp.id)
+                emp_id = emp._origin.id or emp.id
+                old = existing.get(emp_id)
                 commands.append((0, 0, {
-                    "employee_id": emp.id,
+                    "employee_id": emp_id,
                     "per_hour_rate": old.per_hour_rate if old else 0.0,
                     "per_day_rate": old.per_day_rate if old else 0.0,
                     "overtime_percentage": old.overtime_percentage if old else 0.0,
                 }))
             rec.line_ids = commands
+
+    def action_populate_lines(self):
+        for rec in self:
+            rec._check_draft()
+            rec._check_scope_requirements()
+            rec._refresh_lines_from_scope()
         return True
+
+    @api.onchange("employee_scope")
+    def _onchange_employee_scope(self):
+        for rec in self:
+            if rec.state != "draft":
+                continue
+            if rec.employee_scope == "all":
+                rec.department_id = False
+                rec.employee_id = False
+            elif rec.employee_scope == "department":
+                rec.employee_id = False
+            elif rec.employee_scope == "individual":
+                rec.department_id = False
+            rec._refresh_lines_from_scope()
 
     @api.onchange("department_id")
     def _onchange_department_id(self):
         for rec in self:
+            if rec.employee_scope == "individual" and rec.department_id:
+                rec.employee_scope = "department"
+                rec.employee_id = False
+            if rec.employee_scope == "all" and rec.department_id:
+                rec.employee_scope = "department"
             if rec.employee_id and rec.department_id and rec.employee_id.department_id != rec.department_id:
                 rec.employee_id = False
-            if rec.state == "draft":
-                employees = rec._employees_for_selection()
-                existing = {line.employee_id.id: line for line in rec.line_ids}
-                commands = [(5, 0, 0)]
-                for emp in employees:
-                    old = existing.get(emp._origin.id or emp.id)
-                    commands.append((0, 0, {
-                        "employee_id": emp.id,
-                        "per_hour_rate": old.per_hour_rate if old else 0.0,
-                        "per_day_rate": old.per_day_rate if old else 0.0,
-                        "overtime_percentage": old.overtime_percentage if old else 0.0,
-                    }))
-                rec.line_ids = commands
+            rec._refresh_lines_from_scope()
 
     @api.onchange("employee_id")
     def _onchange_employee_id(self):
         for rec in self:
-            if rec.state == "draft":
-                employees = rec._employees_for_selection()
-                existing = {line.employee_id.id: line for line in rec.line_ids}
-                commands = [(5, 0, 0)]
-                for emp in employees:
-                    old = existing.get(emp._origin.id or emp.id)
-                    commands.append((0, 0, {
-                        "employee_id": emp.id,
-                        "per_hour_rate": old.per_hour_rate if old else 0.0,
-                        "per_day_rate": old.per_day_rate if old else 0.0,
-                        "overtime_percentage": old.overtime_percentage if old else 0.0,
-                    }))
-                rec.line_ids = commands
+            if rec.employee_scope == "department" and rec.employee_id:
+                rec.employee_scope = "individual"
+                rec.department_id = False
+            if rec.employee_scope == "all" and rec.employee_id:
+                rec.employee_scope = "individual"
+            rec._refresh_lines_from_scope()
 
     def action_confirm(self):
         for rec in self:
             if rec.state != "draft":
                 raise UserError(_("Only draft overtime configurations can be confirmed."))
+            rec._check_scope_requirements()
             if not rec.line_ids:
                 raise UserError(_("Add at least one employee overtime rate line before confirming."))
             rec._check_duplicate_employees()
@@ -190,6 +261,9 @@ class KioOvertimeConfiguration(models.Model):
             rec.message_post(body=_("Overtime configuration reset to draft."))
 
     def write(self, vals):
+        vals = dict(vals)
+        if vals.get("employee_scope"):
+            vals = self._normalize_scope_vals(vals)
         for rec in self:
             if rec.state == "confirmed" and set(vals) - {"state", "message_main_attachment_id"}:
                 # allow explicit reset to draft
