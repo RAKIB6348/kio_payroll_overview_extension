@@ -263,7 +263,7 @@
               groups="kio_payroll_overview_extension.group_kio_payroll_manager"
               sequence="3"/>
     <menuitem id="menu_kio_deduction"
-              name="Deductions"
+              name="Late Deductions"
               parent="menu_payroll_management"
               action="action_kio_deduction"
               groups="kio_payroll_overview_extension.group_kio_payroll_manager"
