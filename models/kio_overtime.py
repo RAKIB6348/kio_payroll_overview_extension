@@ -88,7 +88,7 @@ class KioOvertime(models.Model):
         copy=False,
     )
     source = fields.Selection(
-        [("manual", "Manual"), ("attendance", "Attendance")],
+        [("manual", "Manual"), ("attendance", "Attendance"), ("cron", "Scheduled Sync")],
         string="Source",
         default="manual",
         required=True,
@@ -438,3 +438,168 @@ class KioOvertime(models.Model):
                 "sticky": False,
             },
         }
+
+    # ------------------------------------------------------------------
+    # Daily overtime cron (scheduled office end based)
+    # ------------------------------------------------------------------
+    @api.model
+    def _utc_naive(self, local_dt):
+        if not local_dt:
+            return False
+        if local_dt.tzinfo is None:
+            return local_dt
+        return local_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+
+    @api.model
+    def _get_schedule_end_for_workday(self, employee, calendar, workday_date, tz):
+        """Return (scheduled_end_utc_naive, scheduled_start_utc_naive) for workday."""
+        if not calendar or not workday_date:
+            return False, False
+        start_local = tz.localize(datetime.combine(workday_date, time.min))
+        end_local = start_local + timedelta(days=3)
+        try:
+            intervals = calendar._work_intervals_batch(
+                start_local, end_local, resources=employee.resource_id, compute_leaves=False
+            ).get(employee.resource_id.id) or calendar._attendance_intervals_batch(
+                start_local, end_local, resources=employee.resource_id, tz=tz
+            ).get(employee.resource_id.id)
+            if intervals:
+                day_intervals = []
+                for start, stop, _meta in sorted(intervals, key=lambda i: i[0]):
+                    if start.astimezone(tz).date() == workday_date:
+                        day_intervals.append((start, stop))
+                if day_intervals:
+                    sched_start = day_intervals[0][0]
+                    sched_end = day_intervals[-1][1]
+                    return self._utc_naive(sched_end), self._utc_naive(sched_start)
+        except Exception:
+            pass
+        # Fallback: weekday lines (may not represent overnight end accurately; best effort).
+        weekday = str(workday_date.weekday())
+        lines = calendar.attendance_ids.filtered(
+            lambda l: str(l.dayofweek) == weekday and not getattr(l, "display_type", False)
+        )
+        if not lines:
+            return False, False
+        hour_from = min(lines.mapped("hour_from"))
+        hour_to = max(lines.mapped("hour_to"))
+
+        def _local_from_hour(hf):
+            h = int(hf)
+            m = int(round((hf - h) * 60))
+            while m >= 60:
+                h += 1
+                m -= 60
+            day_offset = h // 24
+            h = h % 24
+            return tz.localize(datetime.combine(workday_date + timedelta(days=day_offset), time(h, m, 0)))
+
+        return self._utc_naive(_local_from_hour(hour_to)), self._utc_naive(_local_from_hour(hour_from))
+
+    @api.model
+    def _compute_overtime_after_end(self, employee, workday_date, scheduled_end, scheduled_start, attendances, tz):
+        """Overtime Hours = Actual Worked Time After Scheduled Office End."""
+        company = employee.company_id or self.env.company
+        completed = attendances.filtered(lambda a: a.check_in and a.check_out)
+        overtime_seconds = 0.0
+        for att in completed:
+            # overlap of [check_in, check_out] with [scheduled_end, +inf)
+            start = max(att.check_in, scheduled_end)
+            stop = att.check_out
+            if stop > start:
+                overtime_seconds += (stop - start).total_seconds()
+        overtime_hours = overtime_seconds / 3600.0
+        worked_hours = sum(completed.mapped("worked_hours"))
+        check_in = min(attendances.mapped("check_in")) if attendances else False
+        check_out = max(completed.mapped("check_out")) if completed else False
+        scheduled_hours = 0.0
+        if scheduled_start and scheduled_end and scheduled_end > scheduled_start:
+            scheduled_hours = (scheduled_end - scheduled_start).total_seconds() / 3600.0
+
+        overtime_amount = 0.0
+        hourly_rate = 0.0
+        if overtime_hours > 0:
+            enabled, per_hour_rate = self._get_overtime_policy(company)
+            if enabled and per_hour_rate > 0:
+                hourly_rate = per_hour_rate
+                overtime_amount = company.currency_id.round(overtime_hours * per_hour_rate)
+            # if disabled or rate missing, keep hours and amount 0 (cron skips monetary when not enabled;
+            # missing rate: keep 0 amount, consistent with policy - do not create incorrect amount)
+
+        return {
+            "name": self._attendance_reference(employee, workday_date),
+            "employee_id": employee.id,
+            "date": workday_date,
+            "check_in": check_in,
+            "check_out": check_out,
+            "scheduled_hours": round(max(scheduled_hours, 0.0), 2),
+            "worked_hours": round(max(worked_hours, 0.0), 2),
+            "overtime_hours": round(max(overtime_hours, 0.0), 2),
+            "hourly_rate": hourly_rate,
+            "overtime_rate": 0.0,
+            "overtime_amount": overtime_amount,
+            "amount": overtime_amount,
+            "needs_review": False,
+            "review_note": False,
+            "attendance_ids": [(6, 0, attendances.ids)],
+            "source": "cron",
+            "company_id": company.id,
+        }
+
+    @api.model
+    def _cron_daily_overtime_attendance_sync(self):
+        """Once-daily overtime sync (configured for 21:00 Asia/Dhaka).
+        Processes eligible completed attendance where scheduled office end has passed.
+        Overtime Hours = Actual Worked Time After Scheduled Office End.
+        """
+        now = fields.Datetime.now()  # naive UTC
+        dhaka_tz = pytz.timezone("Asia/Dhaka")
+        local_today = pytz.UTC.localize(now).astimezone(dhaka_tz).date()
+        workdays = [local_today, local_today - timedelta(days=1)]
+        employees = self.env["hr.employee"].search([("active", "=", True)])
+        Attendance = self.env["hr.attendance"]
+        for workday_date in workdays:
+            for employee in employees:
+                company = employee.company_id or self.env.company
+                tz = self._get_tz(employee)
+                calendar = self._get_employee_calendar(employee, workday_date)
+                scheduled_end, scheduled_start = self._get_schedule_end_for_workday(
+                    employee, calendar, workday_date, tz
+                )
+                if not scheduled_end:
+                    continue
+                # Defer overnight/unfinished shifts until scheduled end has passed.
+                if now < scheduled_end:
+                    continue
+                existing = self.search([
+                    ("employee_id", "=", employee.id),
+                    ("date", "=", workday_date),
+                    ("company_id", "=", company.id),
+                ], limit=1)
+                if existing and (existing.state == "confirmed" or existing.source == "manual"):
+                    continue
+                # Find completed attendances around this workday (supports overnight).
+                start_window = tz.localize(datetime.combine(workday_date, time.min)) - timedelta(hours=12)
+                end_window = tz.localize(datetime.combine(workday_date, time.min)) + timedelta(days=3)
+                attendances = Attendance.search([
+                    ("employee_id", "=", employee.id),
+                    ("check_in", ">=", self._utc_naive(start_window)),
+                    ("check_in", "<", self._utc_naive(end_window)),
+                    ("check_out", "!=", False),
+                ], order="check_in asc, id asc")
+                if not attendances:
+                    continue  # skip incomplete/missing; next daily run can pick up
+                vals = self._compute_overtime_after_end(
+                    employee, workday_date, scheduled_end, scheduled_start, attendances, tz
+                )
+                if vals["overtime_hours"] <= 0:
+                    # Do not create zero-overtime records; remove draft auto record if it became zero.
+                    if existing and existing.state == "draft" and existing.source in ("attendance", "cron"):
+                        existing.unlink()
+                    continue
+                if existing:
+                    if existing.state == "cancelled":
+                        continue
+                    existing.write(vals)
+                else:
+                    self.create(vals)
