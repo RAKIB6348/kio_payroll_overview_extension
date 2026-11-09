@@ -57,6 +57,28 @@ class ResCompany(models.Model):
         help="Company-wide fixed daily rate reserved for future daily-rate-based payroll calculations.",
     )
 
+    kio_late_deduction_enabled = fields.Boolean(
+        string="Enable Late Salary Deduction",
+        default=False,
+        help="When enabled, qualifying late days and salary deduction days are calculated using the configured policy.",
+    )
+    kio_late_buffer_minutes = fields.Integer(
+        string="Buffer Time (Minutes)",
+        default=10,
+        help="Minutes of grace before a check-in counts as a qualifying late day.",
+    )
+    kio_late_days_threshold = fields.Integer(
+        string="Late Days Threshold",
+        default=3,
+        help="Number of qualifying late days required to complete one deduction threshold.",
+    )
+    kio_late_salary_deduction_days = fields.Float(
+        string="Salary Deduction Days",
+        default=1.0,
+        digits=(16, 2),
+        help="Salary deduction days applied per completed late-days threshold.",
+    )
+
     @api.constrains(
         "kio_overtime_per_hour_rate",
         "kio_overtime_per_day_rate",
@@ -67,6 +89,20 @@ class ResCompany(models.Model):
                 raise ValidationError(_("Per Hour Rate cannot be negative."))
             if company.kio_overtime_per_day_rate < 0:
                 raise ValidationError(_("Per Day Rate cannot be negative."))
+
+    @api.constrains(
+        "kio_late_buffer_minutes",
+        "kio_late_days_threshold",
+        "kio_late_salary_deduction_days",
+    )
+    def _check_kio_late_deduction_policy(self):
+        for company in self:
+            if company.kio_late_buffer_minutes < 0:
+                raise ValidationError(_("Buffer Time (Minutes) cannot be negative."))
+            if company.kio_late_days_threshold < 1:
+                raise ValidationError(_("Late Days Threshold must be at least 1."))
+            if company.kio_late_salary_deduction_days <= 0:
+                raise ValidationError(_("Salary Deduction Days must be greater than 0."))
 
     @api.constrains(
         "salary_journal_id",

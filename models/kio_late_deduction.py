@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+import math
 
 import pytz
 
@@ -47,6 +48,14 @@ class KioDeduction(models.Model):
     scheduled_check_in = fields.Datetime(string="Scheduled In", readonly=True, copy=False)
     actual_check_in = fields.Datetime(string="Actual In", readonly=True, copy=False)
     late_minutes = fields.Float(string="Late Minutes", readonly=True, copy=False, digits=(16, 2), tracking=True)
+    is_qualifying_late_day = fields.Boolean(
+        string="Qualifying Late Day",
+        readonly=True,
+        copy=False,
+        default=False,
+        index=True,
+        help="True when actual late minutes exceed the configured buffer time at calculation time.",
+    )
     deduction_amount = fields.Monetary(
         string="Deduction Amount",
         currency_field="currency_id",
@@ -245,19 +254,59 @@ class KioDeduction(models.Model):
         ], order="check_in asc, id asc")
 
     @api.model
+    def _get_late_deduction_policy(self, company=None):
+        company = company or self.env.company
+        ICP = self.env["ir.config_parameter"].sudo()
+
+        def _bool(key, default):
+            val = ICP.get_param(key)
+            if val is None:
+                return default
+            return str(val).strip().lower() in ("1", "true", "yes")
+
+        def _int(key, default):
+            try:
+                return int(float(ICP.get_param(key, default)))
+            except Exception:
+                return default
+
+        def _float(key, default):
+            try:
+                return float(ICP.get_param(key, default))
+            except Exception:
+                return default
+
+        enabled = bool(getattr(company, "kio_late_deduction_enabled", _bool("kio_payroll_overview_extension.late_deduction_enabled", False)))
+        buffer_minutes = max(0, int(getattr(company, "kio_late_buffer_minutes", _int("kio_payroll_overview_extension.late_buffer_minutes", 10)) or 0))
+        threshold = max(1, int(getattr(company, "kio_late_days_threshold", _int("kio_payroll_overview_extension.late_days_threshold", 3)) or 3))
+        deduction_days = float(getattr(company, "kio_late_salary_deduction_days", _float("kio_payroll_overview_extension.late_salary_deduction_days", 1.0)) or 1.0)
+        if deduction_days <= 0:
+            deduction_days = 1.0
+        return {
+            "enabled": enabled,
+            "buffer_minutes": buffer_minutes,
+            "late_days_threshold": threshold,
+            "salary_deduction_days": deduction_days,
+        }
+
+    @api.model
     def _compute_workday_values(self, employee, workday_date, scheduled_check_in, attendances):
         company = employee.company_id or self.env.company
         actual_check_in = min(attendances.mapped("check_in")) if attendances else False
         late_minutes = 0.0
         if scheduled_check_in and actual_check_in and actual_check_in > scheduled_check_in:
             late_minutes = (actual_check_in - scheduled_check_in).total_seconds() / 60.0
+        late_minutes = round(max(late_minutes, 0.0), 2)
+        policy = self._get_late_deduction_policy(company)
+        is_qualifying_late_day = bool(late_minutes > policy["buffer_minutes"])
         return {
             "name": "LD/%s/%s" % (employee.id, fields.Date.to_string(workday_date)),
             "employee_id": employee.id,
             "date": workday_date,
             "scheduled_check_in": scheduled_check_in,
             "actual_check_in": actual_check_in,
-            "late_minutes": round(max(late_minutes, 0.0), 2),
+            "late_minutes": late_minutes,
+            "is_qualifying_late_day": is_qualifying_late_day,
             "deduction_amount": 0.0,
             "amount": 0.0,
             "attendance_ids": [(6, 0, attendances.ids)],
@@ -383,3 +432,149 @@ class KioDeduction(models.Model):
                 continue
             self._process_employee_workday(employee, workday_date, scheduled_utc, allow_no_checkin=False)
         return self.browse()
+
+
+class KioLateDeductionMonthlySummary(models.Model):
+    _name = "kio.late.deduction.monthly.summary"
+    _description = "Monthly Late Deduction Summary"
+    _inherit = ["mail.thread", "mail.activity.mixin"]
+    _order = "date_from desc, employee_id"
+    _check_company_auto = True
+
+    name = fields.Char(string="Reference", compute="_compute_name", store=True)
+    employee_id = fields.Many2one(
+        "hr.employee", string="Employee", required=True, index=True, tracking=True, check_company=True
+    )
+    month = fields.Selection(
+        [(str(i), str(i)) for i in range(1, 13)],
+        string="Month",
+        required=True,
+    )
+    year = fields.Integer(string="Year", required=True, default=lambda self: fields.Date.today().year)
+    date_from = fields.Date(string="Period Start", compute="_compute_dates", store=True)
+    date_to = fields.Date(string="Period End", compute="_compute_dates", store=True)
+    total_attendance_days = fields.Integer(string="Total Attendance Days", readonly=True, copy=False)
+    total_qualifying_late_days = fields.Integer(string="Total Qualifying Late Days", readonly=True, copy=False)
+    buffer_minutes = fields.Integer(string="Configured Buffer Time", readonly=True, copy=False)
+    late_days_threshold = fields.Integer(string="Late Days Threshold", readonly=True, copy=False)
+    salary_deduction_days_per_threshold = fields.Float(
+        string="Salary Deduction Days Per Threshold", readonly=True, copy=False, digits=(16, 2)
+    )
+    total_salary_deduction_days = fields.Float(
+        string="Calculated Total Salary Deduction Days", readonly=True, copy=False, digits=(16, 2)
+    )
+    policy_enabled = fields.Boolean(string="Policy Enabled", readonly=True, copy=False)
+    state = fields.Selection(
+        [("draft", "Draft"), ("finalized", "Finalized")],
+        string="Status",
+        default="draft",
+        required=True,
+        tracking=True,
+        copy=False,
+    )
+    company_id = fields.Many2one(
+        "res.company", string="Company", required=True, default=lambda self: self.env.company, index=True
+    )
+    currency_id = fields.Many2one(related="company_id.currency_id", store=True, readonly=True)
+
+    _sql_constraints = [
+        (
+            "kio_late_deduction_monthly_summary_uniq",
+            "unique(employee_id, month, year, company_id)",
+            "A monthly late deduction summary already exists for this employee and month.",
+        ),
+    ]
+
+    @api.depends("employee_id", "month", "year")
+    def _compute_name(self):
+        for rec in self:
+            if rec.employee_id and rec.month and rec.year:
+                rec.name = "%s / %s-%02d" % (rec.employee_id.display_name, rec.year, int(rec.month))
+            else:
+                rec.name = _("New")
+
+    @api.depends("month", "year")
+    def _compute_dates(self):
+        for rec in self:
+            if rec.month and rec.year:
+                m = int(rec.month)
+                rec.date_from = fields.Date.to_date("%04d-%02d-01" % (rec.year, m))
+                if m == 12:
+                    rec.date_to = fields.Date.to_date("%04d-12-31" % rec.year)
+                else:
+                    rec.date_to = fields.Date.to_date("%04d-%02d-01" % (rec.year, m + 1)) - timedelta(days=1)
+            else:
+                rec.date_from = False
+                rec.date_to = False
+
+    def _check_manager(self):
+        if not self.env.user.has_group("kio_payroll_overview_extension.group_kio_payroll_manager"):
+            raise AccessError(_("Only Payroll Managers can manage monthly late deduction summaries."))
+
+    @api.model
+    def _calculate_month_values(self, employee, date_from, date_to, company):
+        policy = self.env["kio.deduction"]._get_late_deduction_policy(company)
+        lines = self.env["kio.deduction"].search([
+            ("employee_id", "=", employee.id),
+            ("company_id", "=", company.id),
+            ("date", ">=", date_from),
+            ("date", "<=", date_to),
+            ("state", "!=", "cancelled"),
+            ("actual_check_in", "!=", False),
+        ])
+        attendance_days = len(set(lines.mapped("date")))
+        qualifying_days = sum(1 for line in lines if (line.late_minutes or 0.0) > policy["buffer_minutes"])
+        if not policy["enabled"]:
+            deduction_days = 0.0
+        else:
+            completed = math.floor(qualifying_days / policy["late_days_threshold"]) if policy["late_days_threshold"] else 0
+            deduction_days = completed * policy["salary_deduction_days"]
+        return {
+            "total_attendance_days": attendance_days,
+            "total_qualifying_late_days": qualifying_days,
+            "buffer_minutes": policy["buffer_minutes"],
+            "late_days_threshold": policy["late_days_threshold"],
+            "salary_deduction_days_per_threshold": policy["salary_deduction_days"],
+            "total_salary_deduction_days": deduction_days,
+            "policy_enabled": policy["enabled"],
+        }
+
+    def action_compute(self):
+        self._check_manager()
+        for rec in self:
+            if rec.state == "finalized":
+                continue  # do not silently recalculate finalized periods
+            if not rec.employee_id or not rec.date_from or not rec.date_to:
+                continue
+            vals = self._calculate_month_values(rec.employee_id, rec.date_from, rec.date_to, rec.company_id)
+            rec.write(vals)
+        return True
+
+    def action_finalize(self):
+        self._check_manager()
+        for rec in self:
+            if rec.state == "finalized":
+                continue
+            rec.action_compute()
+            rec.state = "finalized"
+            rec.message_post(body=_("Monthly late deduction summary finalized. Policy snapshot stored."))
+
+    def action_draft(self):
+        self._check_manager()
+        for rec in self:
+            # Explicit correction only; finalized historical snapshots should not be silently recalculated.
+            rec.state = "draft"
+            rec.message_post(body=_("Monthly late deduction summary reset to draft by an authorized user."))
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        records.filtered(lambda r: r.state == "draft").action_compute()
+        return records
+
+    def write(self, vals):
+        res = super().write(vals)
+        # Dynamic: draft records can be recomputed when key fields change; finalized remain unchanged.
+        if any(f in vals for f in ("employee_id", "month", "year", "company_id")):
+            self.filtered(lambda r: r.state == "draft").action_compute()
+        return res

@@ -313,4 +313,78 @@
               action="action_kio_deduction"
               groups="kio_payroll_overview_extension.group_kio_payroll_manager"
               sequence="4"/>
+    <!-- Monthly Late Deduction Summary -->
+    <record id="view_kio_late_deduction_monthly_summary_tree" model="ir.ui.view">
+        <field name="name">kio.late.deduction.monthly.summary.tree</field>
+        <field name="model">kio.late.deduction.monthly.summary</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="employee_id"/>
+                <field name="year"/>
+                <field name="month"/>
+                <field name="total_attendance_days"/>
+                <field name="total_qualifying_late_days"/>
+                <field name="buffer_minutes"/>
+                <field name="late_days_threshold"/>
+                <field name="salary_deduction_days_per_threshold"/>
+                <field name="total_salary_deduction_days"/>
+                <field name="state" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'finalized'"/>
+                <field name="company_id" column_invisible="1"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_kio_late_deduction_monthly_summary_form" model="ir.ui.view">
+        <field name="name">kio.late.deduction.monthly.summary.form</field>
+        <field name="model">kio.late.deduction.monthly.summary</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_compute" type="object" string="Compute" class="btn-secondary" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state == 'finalized'"/>
+                    <button name="action_finalize" type="object" string="Finalize" class="btn-primary" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state == 'finalized'"/>
+                    <button name="action_draft" type="object" string="Reset to Draft" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state != 'finalized'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,finalized"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="company_id" invisible="1"/>
+                            <field name="employee_id" readonly="state == 'finalized'"/>
+                            <field name="year" readonly="state == 'finalized'"/>
+                            <field name="month" readonly="state == 'finalized'"/>
+                            <field name="date_from" readonly="1"/>
+                            <field name="date_to" readonly="1"/>
+                        </group>
+                        <group string="Policy Snapshot / Current Values">
+                            <field name="policy_enabled" readonly="1"/>
+                            <field name="buffer_minutes" readonly="1"/>
+                            <field name="late_days_threshold" readonly="1"/>
+                            <field name="salary_deduction_days_per_threshold" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Monthly Summary">
+                        <field name="total_attendance_days" readonly="1"/>
+                        <field name="total_qualifying_late_days" readonly="1"/>
+                        <field name="total_salary_deduction_days" readonly="1"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_kio_late_deduction_monthly_summary" model="ir.actions.act_window">
+        <field name="name">Monthly Late Deductions</field>
+        <field name="res_model">kio.late.deduction.monthly.summary</field>
+        <field name="view_mode">tree,form</field>
+        <field name="target">current</field>
+    </record>
+
+    <menuitem id="menu_kio_late_deduction_monthly_summary"
+              name="Monthly Late Deductions"
+              parent="menu_payroll_management"
+              action="action_kio_late_deduction_monthly_summary"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="5"/>
+
 </odoo>

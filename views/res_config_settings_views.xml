@@ -36,7 +36,7 @@
                            name="kio_overtime_policy_setting_container">
                         <setting string="Enable Overtime Monetary Calculation"
                                  company_dependent="1"
-                                 help="Default policy: overtime hours are calculated automatically from attendance, but monetary overtime amount is only calculated when this is explicitly enabled.">
+                                 help="Default policy: overtime hours are calculated automatically from attendance, but overtime monetary amount is only calculated when this is explicitly enabled.">
                             <field name="kio_overtime_monetary_enabled"/>
                         </setting>
                         <setting string="Per Hour Rate (BDT)"
@@ -46,6 +46,25 @@
                         <setting string="Per Day Rate (BDT)"
                                  help="Company-wide fixed daily rate reserved for future daily-rate-based payroll calculations. It is not automatically added to overtime or payroll.">
                             <field name="kio_overtime_per_day_rate"/>
+                        </setting>
+                    </block>
+                    <block title="Attendance Late Deduction Policy"
+                           name="kio_late_deduction_policy_setting_container">
+                        <setting string="Enable Late Salary Deduction"
+                                 help="When enabled, qualifying late days and salary deduction days are calculated from attendance using the configured policy. Newly calculated draft records and monthly summaries use the current configuration.">
+                            <field name="kio_late_deduction_enabled"/>
+                        </setting>
+                        <setting string="Buffer Time (Minutes)"
+                                 help="A check-in counts as a qualifying late day only when Actual Late Minutes are greater than this buffer time. Actual Late Minutes = max(0, Actual Check In - Scheduled Check In).">
+                            <field name="kio_late_buffer_minutes"/>
+                        </setting>
+                        <setting string="Late Days Threshold"
+                                 help="Number of qualifying late days required for one completed deduction threshold.">
+                            <field name="kio_late_days_threshold"/>
+                        </setting>
+                        <setting string="Salary Deduction Days"
+                                 help="Salary deduction days applied per completed threshold. Formula: Completed Thresholds = floor(Total Qualifying Late Days / Late Days Threshold); Total Salary Deduction Days = Completed Thresholds × Salary Deduction Days.">
+                            <field name="kio_late_salary_deduction_days"/>
                         </setting>
                     </block>
                 </app>
