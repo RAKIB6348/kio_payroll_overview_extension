@@ -1,3 +1,8 @@
+import calendar as pycalendar
+from datetime import datetime, time
+
+import pytz
+
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError, ValidationError
 
@@ -335,11 +340,25 @@ class KioOvertimeConfigurationLine(models.Model):
         string="Currency",
         readonly=True,
     )
+    has_applicable_contract = fields.Boolean(
+        string="Has Applicable Contract",
+        compute="_compute_contract_salary_info",
+        readonly=True,
+    )
     basic_salary = fields.Monetary(
         string="Basic Salary (BDT)",
-        compute="_compute_basic_salary",
+        compute="_compute_contract_salary_info",
         currency_field="currency_id",
         readonly=True,
+        help="Read from the applicable running hr.contract wage for the effective date. "
+             "If no applicable contract is found, this is shown as 0.00 and marked as missing contract information.",
+    )
+    per_hour_salary = fields.Monetary(
+        string="Per Hour Salary (BDT)",
+        compute="_compute_contract_salary_info",
+        currency_field="currency_id",
+        readonly=True,
+        help="Basic Salary divided by the applicable monthly scheduled working hours from the working schedule.",
     )
     per_hour_rate = fields.Float(string="Per Hour Rate (BDT)", default=0.0, digits=(16, 2))
     per_day_rate = fields.Float(string="Per Day Rate (BDT)", default=0.0, digits=(16, 2))
@@ -351,24 +370,131 @@ class KioOvertimeConfigurationLine(models.Model):
         readonly=True,
     )
 
-    @api.depends("employee_id", "company_id")
-    def _compute_basic_salary(self):
-        Contract = self.env.get("hr.contract")
-        today = fields.Date.context_today(self)
+    def _get_salary_effective_date(self):
+        self.ensure_one()
+        return fields.Date.context_today(self)
+
+    def _get_applicable_contract(self, date_ref=None):
+        """Return the applicable running contract for the employee/company/effective date.
+
+        Uses hr.employee._get_contracts (Odoo's canonical contract lookup) to respect
+        the database's actual contract state/date semantics. A Running contract is
+        state 'open' in Odoo 17 hr_contract.
+        """
+        self.ensure_one()
+        if not self.employee_id or "hr.contract" not in self.env:
+            return self.env["hr.contract"].browse() if "hr.contract" in self.env else False
+        date_ref = date_ref or self._get_salary_effective_date()
+        company = self.company_id or self.configuration_id.company_id or self.env.company
+        employee = self.employee_id.sudo()
+
+        contracts = self.env["hr.contract"].browse()
+        if hasattr(employee, "_get_contracts"):
+            contracts = employee._get_contracts(date_ref, date_ref, states=["open"])
+            contracts = contracts.filtered(lambda c: c.company_id == company)
+        if not contracts:
+            # ORM fallback using actual state/date fields (do not rely on employee.contract_id).
+            contracts = self.env["hr.contract"].sudo().search([
+                ("employee_id", "=", self.employee_id.id),
+                ("company_id", "=", company.id),
+                ("state", "=", "open"),
+                ("date_start", "<=", date_ref),
+                "|",
+                ("date_end", "=", False),
+                ("date_end", ">=", date_ref),
+            ], order="date_start desc, id desc")
+        return contracts[:1]
+
+    def _get_applicable_calendar(self, contract, date_ref=None):
+        self.ensure_one()
+        date_ref = date_ref or self._get_salary_effective_date()
+        calendar = self.env["resource.calendar"].browse()
+        if contract and "resource_calendar_id" in contract._fields and contract.resource_calendar_id:
+            calendar = contract.resource_calendar_id
+        if not calendar and self.employee_id:
+            calendar = self.employee_id.resource_calendar_id
+        if not calendar and contract and contract.company_id.resource_calendar_id:
+            calendar = contract.company_id.resource_calendar_id
+        if not calendar:
+            company = self.company_id or self.configuration_id.company_id or self.env.company
+            calendar = company.resource_calendar_id
+        return calendar
+
+    def _get_monthly_scheduled_hours(self, contract=None, date_ref=None):
+        self.ensure_one()
+        date_ref = date_ref or self._get_salary_effective_date()
+        calendar = self._get_applicable_calendar(contract, date_ref=date_ref)
+        resource = self.employee_id.resource_id if self.employee_id else self.env["resource.resource"].browse()
+        if not calendar:
+            return 0.0
+
+        tz_name = (
+            calendar.tz
+            or (self.employee_id.tz if self.employee_id else False)
+            or self.env.company.resource_calendar_id.tz
+            or "UTC"
+        )
+        try:
+            local_tz = pytz.timezone(tz_name)
+        except Exception:
+            local_tz = pytz.UTC
+
+        last_day = pycalendar.monthrange(date_ref.year, date_ref.month)[1]
+        start_local = local_tz.localize(datetime.combine(date_ref.replace(day=1), time.min))
+        end_local = local_tz.localize(datetime.combine(date_ref.replace(day=last_day), time.max))
+        start_dt = start_local.astimezone(pytz.UTC).replace(tzinfo=None)
+        end_dt = end_local.astimezone(pytz.UTC).replace(tzinfo=None)
+
+        # Primary: calendar scheduled hours for the month (respects attendances/schedule).
+        for compute_leaves in (False, True):
+            try:
+                hours = calendar.get_work_hours_count(start_dt, end_dt, compute_leaves=compute_leaves)
+                if hours:
+                    return float(hours)
+            except TypeError:
+                try:
+                    hours = calendar.get_work_hours_count(start_dt, end_dt)
+                    if hours:
+                        return float(hours)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        # Fallback: attendance/work intervals for employee-specific resource schedules.
+        if resource and hasattr(calendar, "_work_intervals_batch"):
+            for compute_leaves in (False, True):
+                try:
+                    intervals = calendar._work_intervals_batch(
+                        start_local, end_local, resources=resource, compute_leaves=compute_leaves
+                    )[resource.id]
+                    total = 0.0
+                    for start_dt_i, stop_dt_i, _meta in intervals:
+                        total += (stop_dt_i - start_dt_i).total_seconds() / 3600.0
+                    if total > 0:
+                        return float(total)
+                except Exception:
+                    continue
+        return 0.0
+
+    @api.depends("employee_id", "employee_id.contract_id", "employee_id.resource_calendar_id", "company_id")
+    def _compute_contract_salary_info(self):
         for line in self:
-            wage = 0.0
-            if line.employee_id and line.company_id and Contract:
-                contract = Contract.search([
-                    ("employee_id", "=", line.employee_id.id),
-                    ("company_id", "=", line.company_id.id),
-                    ("state", "=", "open"),
-                    ("date_start", "<=", today),
-                    "|",
-                    ("date_end", "=", False),
-                    ("date_end", ">=", today),
-                ], order="date_start desc, id desc", limit=1)
-                wage = contract.wage or 0.0
-            line.basic_salary = wage
+            contract = line._get_applicable_contract()
+            if not contract:
+                line.has_applicable_contract = False
+                line.basic_salary = 0.0
+                line.per_hour_salary = 0.0
+                continue
+
+            wage = contract.wage
+            basic_salary = 0.0 if wage is False or wage is None else wage
+            monthly_hours = line._get_monthly_scheduled_hours(contract=contract)
+            per_hour_salary = (basic_salary / monthly_hours) if monthly_hours > 0 else 0.0
+
+            line.has_applicable_contract = True
+            line.basic_salary = basic_salary
+            line.per_hour_salary = per_hour_salary
 
     @api.constrains("per_hour_rate", "per_day_rate", "overtime_percentage")
     def _check_rates(self):

@@ -55,12 +55,14 @@
                     <notebook>
                         <page string="Employee Overtime Rates" name="employee_overtime_rates">
                             <field name="line_ids" readonly="state == 'confirmed'">
-                                <tree editable="bottom">
+                                <tree editable="bottom" decoration-danger="not has_applicable_contract">
                                     <field name="company_id" column_invisible="1"/>
                                     <field name="currency_id" column_invisible="1"/>
+                                    <field name="has_applicable_contract" column_invisible="1"/>
                                     <field name="employee_id"/>
                                     <field name="department_id" readonly="1"/>
                                     <field name="basic_salary" readonly="1"/>
+                                    <field name="per_hour_salary" readonly="1"/>
                                     <field name="per_hour_rate" column_invisible="parent.calculation_type == 'percentage'"/>
                                     <field name="per_day_rate" column_invisible="parent.calculation_type == 'percentage'"/>
                                     <field name="overtime_percentage" column_invisible="parent.calculation_type != 'percentage'"/>
