@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Custom Employee Payslip PDF Report Action -->
+    <record id="action_report_employee_payslip" model="ir.actions.report">
+        <field name="name">Employee Payslip</field>
+        <field name="model">kio.payroll.payslip</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">kio_payroll_overview_extension.report_employee_payslip</field>
+        <field name="report_file">kio_payroll_overview_extension.report_employee_payslip</field>
+        <field name="print_report_name">'Payslip_' + (object.employee_id.name or 'Employee').replace(' ', '_') + '_' + (object.date_from.strftime('%B_%Y') if object.date_from else '')</field>
+        <field name="binding_model_id" ref="model_kio_payroll_payslip"/>
+        <field name="binding_type">report</field>
+    </record>
+
+    <!-- Custom Employee Payslip PDF Report Template -->
+    <template id="report_employee_payslip">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="o">
+                <t t-set="data" t-value="o.get_payslip_report_data()"/>
+                <t t-call="web.external_layout">
+                    <div class="page o_kio_payslip_report" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #000000; font-size: 13px;">
+                        <style type="text/css">
+                            .o_kio_payslip_report table,
+                            .o_kio_payslip_report thead,
+                            .o_kio_payslip_report tbody,
+                            .o_kio_payslip_report tfoot,
+                            .o_kio_payslip_report tr,
+                            .o_kio_payslip_report th,
+                            .o_kio_payslip_report td {
+                                background: #ffffff !important;
+                                background-color: #ffffff !important;
+                                color: #000000;
+                            }
+                            .o_kio_payslip_report .badge {
+                                background: #ffffff !important;
+                                background-color: #ffffff !important;
+                                color: #000000 !important;
+                            }
+                            .o_kio_payslip_report .table > :not(caption) > * > * {
+                                background-color: #ffffff !important;
+                            }
+                        </style>
+                        
+                        <!-- Header banner -->
+                        <div class="row mb-4 align-items-center" style="border-bottom: 2px solid #000000; padding-bottom: 12px;">
+                            <div class="col-7">
+                                <h2 style="color: #000000; font-weight: 700; margin-bottom: 4px; font-size: 24px;">EMPLOYEE PAYSLIP</h2>
+                                <div style="font-size: 13px; color: #000000;">
+                                    <strong t-esc="data['company_name']"/>
+                                </div>
+                            </div>
+                            <div class="col-5 text-end">
+                                <div style="font-size: 12px; color: #000000;">Payslip Reference: <strong style="color: #000000;" t-field="o.number"/></div>
+                                <div style="font-size: 12px; color: #000000;">Payment Date: <strong style="color: #000000;" t-esc="data['payment_date']"/></div>
+                                <div class="mt-1">
+                                    <span t-if="data['payment_state'] == 'paid'" class="badge" style="background-color: #ffffff; color: #000000; border: 1px solid #000000; font-size: 11px; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">Paid</span>
+                                    <span t-elif="data['payment_state'] == 'partial'" class="badge" style="background-color: #ffffff; color: #000000; border: 1px solid #000000; font-size: 11px; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">Partially Paid</span>
+                                    <span t-else="" class="badge" style="background-color: #ffffff; color: #000000; border: 1px solid #000000; font-size: 11px; padding: 4px 10px; border-radius: 4px; text-transform: uppercase; font-weight: 600;">Unpaid</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Employee & Payroll Details Cards -->
+                        <div class="row mb-4">
+                            <div class="col-6">
+                                <table class="table table-sm table-borderless mb-0" style="background-color: #ffffff; border-radius: 6px; border: 1px solid #dee2e6;">
+                                    <tr style="background-color: #ffffff;">
+                                        <td colspan="2" style="background-color: #ffffff; border-bottom: 1px solid #dee2e6; padding: 8px 12px;">
+                                            <strong style="color: #000000; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Employee Details</strong>
+                                        </td>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; width: 40%; color: #000000; padding: 6px 12px;">Employee Name:</td>
+                                        <td style="background-color: #ffffff; width: 60%; font-weight: 600; color: #000000; padding: 6px 12px;" t-esc="data['employee_name']"/>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;">Employee ID:</td>
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;" t-esc="data['employee_id']"/>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;">Designation:</td>
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;" t-esc="data['designation']"/>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;">Department:</td>
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;" t-esc="data['department']"/>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-6">
+                                <table class="table table-sm table-borderless mb-0" style="background-color: #ffffff; border-radius: 6px; border: 1px solid #dee2e6;">
+                                    <tr style="background-color: #ffffff;">
+                                        <td colspan="2" style="background-color: #ffffff; border-bottom: 1px solid #dee2e6; padding: 8px 12px;">
+                                            <strong style="color: #000000; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Payroll Period &amp; Status</strong>
+                                        </td>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; width: 40%; color: #000000; padding: 6px 12px;">Payroll Period:</td>
+                                        <td style="background-color: #ffffff; width: 60%; font-weight: 600; color: #000000; padding: 6px 12px;" t-esc="data['period']"/>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;">Payroll Batch:</td>
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;" t-esc="data['batch_name']"/>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;">Payment Status:</td>
+                                        <td style="background-color: #ffffff; padding: 6px 12px;">
+                                            <strong style="color: #000000;" t-esc="data['payment_status']"/>
+                                        </td>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;">Payment Date:</td>
+                                        <td style="background-color: #ffffff; color: #000000; padding: 6px 12px;" t-esc="data['payment_date']"/>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Salary Breakdown Section -->
+                        <h4 style="color: #000000; font-size: 14px; font-weight: 700; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Salary Breakdown</h4>
+                        <table class="table table-bordered mb-4" style="border: 1px solid #dee2e6;">
+                            <thead style="background-color: #ffffff;">
+                                <tr style="background-color: #ffffff;">
+                                    <th style="background-color: #ffffff; padding: 8px 12px; color: #000000; font-size: 12px; text-transform: uppercase;">Salary Component</th>
+                                    <th style="background-color: #ffffff; padding: 8px 12px; color: #000000; font-size: 12px; text-transform: uppercase; text-align: center; width: 25%;">Category</th>
+                                    <th style="background-color: #ffffff; padding: 8px 12px; color: #000000; font-size: 12px; text-transform: uppercase; text-align: right; width: 30%;">Amount (BDT)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="background-color: #ffffff;">
+                                    <td style="background-color: #ffffff; padding: 8px 12px; color: #000000;">Basic Salary</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: center; color: #000000;">Earning</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: right; font-weight: 600; color: #000000;" t-esc="data['basic_salary_formatted']"/>
+                                </tr>
+                                <tr style="background-color: #ffffff;">
+                                    <td style="background-color: #ffffff; padding: 8px 12px; color: #000000;">Allowances</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: center; color: #000000;">Earning</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: right; font-weight: 600; color: #000000;" t-esc="data['allowance_formatted']"/>
+                                </tr>
+                                <tr style="background-color: #ffffff;">
+                                    <td style="background-color: #ffffff; padding: 8px 12px; color: #000000;">Overtime</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: center; color: #000000;">Earning</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: right; font-weight: 600; color: #000000;" t-esc="data['overtime_formatted']"/>
+                                </tr>
+                                <tr style="background-color: #ffffff;">
+                                    <td style="background-color: #ffffff; padding: 8px 12px; color: #000000;">Bonuses</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: center; color: #000000;">Earning</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: right; font-weight: 600; color: #000000;" t-esc="data['bonus_formatted']"/>
+                                </tr>
+                                <tr style="background-color: #ffffff;">
+                                    <td style="background-color: #ffffff; padding: 8px 12px; color: #000000;">Deductions</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: center; color: #000000;">Deduction</td>
+                                    <td style="background-color: #ffffff; padding: 8px 12px; text-align: right; font-weight: 600; color: #000000;">
+                                        <t t-if="data['deduction'] > 0">-<t t-esc="data['deduction_formatted']"/></t>
+                                        <t t-else=""><t t-esc="data['deduction_formatted']"/></t>
+                                    </td>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr style="background-color: #ffffff; font-size: 14px;">
+                                    <td colspan="2" style="background-color: #ffffff; padding: 10px 12px; font-weight: 700; color: #000000;">
+                                        NET SALARY
+                                    </td>
+                                    <td style="background-color: #ffffff; padding: 10px 12px; text-align: right; font-weight: 700; color: #000000; font-size: 15px;" t-esc="data['net_salary_formatted']"/>
+                                </tr>
+                            </tfoot>
+                        </table>
+
+                        <!-- Payment Summary Box -->
+                        <div class="row mb-5">
+                            <div class="col-6 offset-6">
+                                <table class="table table-sm table-bordered mb-0" style="background-color: #ffffff; border: 1px solid #dee2e6;">
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; padding: 6px 12px; color: #000000;">Total Paid:</td>
+                                        <td style="background-color: #ffffff; padding: 6px 12px; text-align: right; font-weight: 600; color: #000000;" t-esc="data['paid_amount_formatted']"/>
+                                    </tr>
+                                    <tr style="background-color: #ffffff;">
+                                        <td style="background-color: #ffffff; padding: 6px 12px; color: #000000;">Remaining Balance:</td>
+                                        <td style="background-color: #ffffff; padding: 6px 12px; text-align: right; font-weight: 600; color: #000000;" t-esc="data['unpaid_amount_formatted']"/>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Signatures -->
+                        <div class="row" style="margin-top: 60px;">
+                            <div class="col-5 text-center">
+                                <div style="border-top: 1px dashed #000000; padding-top: 8px;">
+                                    <strong style="color: #000000;">Employee Signature</strong>
+                                </div>
+                            </div>
+                            <div class="col-2"/>
+                            <div class="col-5 text-center">
+                                <div style="border-top: 1px dashed #000000; padding-top: 8px;">
+                                    <strong style="color: #000000;">Authorized Signature</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </t>
+            </t>
+        </t>
+    </template>
+</odoo>

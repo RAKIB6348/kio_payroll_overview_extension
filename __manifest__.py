@@ -1,0 +1,32 @@
+{
+    "name": "KIO Payroll Overview Extension",
+    "version": "17.0.3.0.0",
+    "category": "Human Resources/Payroll",
+    "summary": "Independent payroll dashboard and payroll processing",
+    "author": "KIO",
+    "license": "LGPL-3",
+    "depends": ["hr", "hr_attendance", "hr_contract", "account", "web"],
+    "data": [
+        "security/kio_payroll_security.xml",
+        "security/ir.model.access.csv",
+        "data/kio_bonus_type_data.xml",
+        "views/payroll_overview_views.xml",
+        "views/payroll_report_views.xml",
+        "views/kio_bonus_views.xml",
+        "views/kio_bonus_type_views.xml",
+        "views/kio_payroll_adjustment_views.xml",
+        "views/kio_payroll_views.xml",
+        "views/res_config_settings_views.xml",
+    ],
+    "assets": {
+        "web.assets_backend": [
+            "kio_payroll_overview_extension/static/src/js/payroll_overview.js",
+            "kio_payroll_overview_extension/static/src/xml/payroll_overview.xml",
+            "kio_payroll_overview_extension/static/src/scss/payroll_overview.scss",
+        ],
+    },
+    "installable": True,
+    "application": False,
+    "auto_install": False,
+}
+

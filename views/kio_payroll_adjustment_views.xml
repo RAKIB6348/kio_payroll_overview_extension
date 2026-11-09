@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Overtime -->
+    <record id="view_kio_overtime_tree" model="ir.ui.view">
+        <field name="name">kio.overtime.tree</field>
+        <field name="model">kio.overtime</field>
+        <field name="arch" type="xml">
+            <tree default_order="date desc, id desc" decoration-warning="needs_review">
+                <field name="employee_id"/>
+                <field name="department_id"/>
+                <field name="date"/>
+                <field name="check_in" optional="show"/>
+                <field name="check_out" optional="show"/>
+                <field name="scheduled_hours" sum="Scheduled"/>
+                <field name="worked_hours" sum="Worked"/>
+                <field name="overtime_hours" sum="Overtime"/>
+                <field name="overtime_amount" widget="monetary" sum="Total"/>
+                <field name="needs_review" optional="hide"/>
+                <field name="state" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'confirmed'" decoration-danger="state == 'cancelled'"/>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="company_id" column_invisible="1"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_kio_overtime_form" model="ir.ui.view">
+        <field name="name">kio.overtime.form</field>
+        <field name="model">kio.overtime</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_confirm" type="object" string="Confirm" class="btn-primary" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state != 'draft'"/>
+                    <button name="action_cancel" type="object" string="Cancel" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state == 'cancelled'"/>
+                    <button name="action_draft" type="object" string="Reset to Draft" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state != 'cancelled'"/>
+                    <button name="action_sync_attendance" type="object" string="Sync Attendance" groups="kio_payroll_overview_extension.group_kio_payroll_manager" class="btn-secondary"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,cancelled"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-warning" role="alert" invisible="not needs_review">
+                        <strong>Needs Review:</strong>
+                        <field name="review_note" nolabel="1" readonly="1" class="oe_inline"/>
+                    </div>
+                    <group>
+                        <group string="Employee &amp; Attendance">
+                            <field name="company_id" invisible="1"/>
+                            <field name="currency_id" invisible="1"/>
+                            <field name="name" readonly="state == 'confirmed'"/>
+                            <field name="employee_id" readonly="state == 'confirmed'"/>
+                            <field name="department_id"/>
+                            <field name="date" readonly="state == 'confirmed'"/>
+                            <field name="check_in"/>
+                            <field name="check_out"/>
+                        </group>
+                        <group string="Hours &amp; Amount">
+                            <field name="scheduled_hours"/>
+                            <field name="worked_hours"/>
+                            <field name="overtime_hours"/>
+                            <field name="hourly_rate"/>
+                            <field name="overtime_rate"/>
+                            <field name="overtime_amount"/>
+                            <field name="amount" invisible="1"/>
+                            <field name="source" readonly="1"/>
+                            <field name="needs_review" readonly="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Attendance References" name="attendance_refs">
+                            <field name="attendance_ids" readonly="1">
+                                <tree>
+                                    <field name="employee_id"/>
+                                    <field name="check_in"/>
+                                    <field name="check_out"/>
+                                    <field name="worked_hours"/>
+                                </tree>
+                            </field>
+                        </page>
+                        <page string="Description" name="description">
+                            <field name="description" placeholder="Description..."/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_kio_overtime_search" model="ir.ui.view">
+        <field name="name">kio.overtime.search</field>
+        <field name="model">kio.overtime</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="employee_id"/>
+                <field name="department_id"/>
+                <field name="name"/>
+                <field name="date"/>
+                <filter name="today" string="Today" domain="[('date', '=', context_today().strftime('%Y-%m-%d'))]"/>
+                <filter name="yesterday" string="Yesterday" domain="[('date', '=', (context_today() - relativedelta(days=1)).strftime('%Y-%m-%d'))]"/>
+                <filter name="this_week" string="This Week" domain="[('date', '&gt;=', (context_today() - relativedelta(weekday=0)).strftime('%Y-%m-%d')), ('date', '&lt;=', (context_today() + relativedelta(weekday=6)).strftime('%Y-%m-%d'))]"/>
+                <filter name="this_month" string="This Month" domain="[('date', '&gt;=', context_today().strftime('%Y-%m-01'))]"/>
+                <filter name="last_month" string="Last Month" domain="[('date', '&gt;=', (context_today() - relativedelta(months=1)).strftime('%Y-%m-01')), ('date', '&lt;', context_today().strftime('%Y-%m-01'))]"/>
+                <separator/>
+                <filter name="has_overtime" string="Has Overtime" domain="[('overtime_hours', '&gt;', 0)]"/>
+                <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                <filter name="confirmed" string="Confirmed" domain="[('state', '=', 'confirmed')]"/>
+                <filter name="cancelled" string="Cancelled" domain="[('state', '=', 'cancelled')]"/>
+                <filter name="needs_review" string="Needs Review" domain="[('needs_review', '=', True)]"/>
+                <separator/>
+                <filter name="date_range" string="Date" date="date"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_employee" string="Employee" context="{'group_by': 'employee_id'}"/>
+                    <filter name="group_department" string="Department" context="{'group_by': 'department_id'}"/>
+                    <filter name="group_date" string="Date" context="{'group_by': 'date'}"/>
+                    <filter name="group_month" string="Month" context="{'group_by': 'date:month'}"/>
+                    <filter name="group_state" string="Status" context="{'group_by': 'state'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_kio_overtime_sync_attendance" model="ir.actions.server">
+        <field name="name">Sync Attendance</field>
+        <field name="model_id" ref="model_kio_overtime"/>
+        <field name="binding_model_id" ref="model_kio_overtime"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">action = model.action_sync_attendance()</field>
+        <field name="groups_id" eval="[(4, ref('kio_payroll_overview_extension.group_kio_payroll_manager'))]"/>
+    </record>
+
+    <record id="action_kio_overtime" model="ir.actions.act_window">
+        <field name="name">Overtime</field>
+        <field name="res_model">kio.overtime</field>
+        <field name="view_mode">tree,form</field>
+        <field name="search_view_id" ref="view_kio_overtime_search"/>
+        <field name="context">{'search_default_this_month': 1}</field>
+        <field name="target">current</field>
+    </record>
+
+    <!-- Commission -->
+    <record id="view_kio_commission_tree" model="ir.ui.view">
+        <field name="name">kio.commission.tree</field>
+        <field name="model">kio.commission</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+                <field name="company_id" column_invisible="1"/>
+                <field name="employee_id"/>
+                <field name="date"/>
+                <field name="amount" widget="monetary"/>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="state" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'confirmed'" decoration-danger="state == 'cancelled'"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_kio_commission_form" model="ir.ui.view">
+        <field name="name">kio.commission.form</field>
+        <field name="model">kio.commission</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_confirm" type="object" string="Confirm" class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_cancel" type="object" string="Cancel" invisible="state == 'cancelled'"/>
+                    <button name="action_draft" type="object" string="Reset to Draft" invisible="state != 'cancelled'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,cancelled"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="company_id" invisible="1"/>
+                            <field name="name"/>
+                            <field name="employee_id"/>
+                            <field name="date"/>
+                        </group>
+                        <group>
+                            <field name="amount"/>
+                            <field name="currency_id" invisible="1"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="description" placeholder="Description..."/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_kio_commission" model="ir.actions.act_window">
+        <field name="name">Commission</field>
+        <field name="res_model">kio.commission</field>
+        <field name="view_mode">tree,form</field>
+        <field name="target">current</field>
+    </record>
+
+    <!-- Deductions -->
+    <record id="view_kio_deduction_tree" model="ir.ui.view">
+        <field name="name">kio.deduction.tree</field>
+        <field name="model">kio.deduction</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+                <field name="company_id" column_invisible="1"/>
+                <field name="employee_id"/>
+                <field name="date"/>
+                <field name="amount" widget="monetary"/>
+                <field name="currency_id" column_invisible="1"/>
+                <field name="state" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'confirmed'" decoration-danger="state == 'cancelled'"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_kio_deduction_form" model="ir.ui.view">
+        <field name="name">kio.deduction.form</field>
+        <field name="model">kio.deduction</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_confirm" type="object" string="Confirm" class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_cancel" type="object" string="Cancel" invisible="state == 'cancelled'"/>
+                    <button name="action_draft" type="object" string="Reset to Draft" invisible="state != 'cancelled'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,cancelled"/>
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="company_id" invisible="1"/>
+                            <field name="name"/>
+                            <field name="employee_id"/>
+                            <field name="date"/>
+                        </group>
+                        <group>
+                            <field name="amount"/>
+                            <field name="currency_id" invisible="1"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="description" placeholder="Description..."/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_kio_deduction" model="ir.actions.act_window">
+        <field name="name">Deductions</field>
+        <field name="res_model">kio.deduction</field>
+        <field name="view_mode">tree,form</field>
+        <field name="target">current</field>
+    </record>
+
+    <!-- Submenus under Payroll Management (parent defined in kio_bonus_views.xml) -->
+    <menuitem id="menu_kio_overtime"
+              name="Overtime"
+              parent="menu_payroll_management"
+              action="action_kio_overtime"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="2"/>
+    <menuitem id="menu_kio_commission"
+              name="Commission"
+              parent="menu_payroll_management"
+              action="action_kio_commission"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="3"/>
+    <menuitem id="menu_kio_deduction"
+              name="Deductions"
+              parent="menu_payroll_management"
+              action="action_kio_deduction"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="4"/>
+</odoo>

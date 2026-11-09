@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_payroll_overview" model="ir.actions.client">
+        <field name="name">Payroll Overview</field>
+        <field name="tag">kio_payroll_overview.payroll_overview</field>
+        <field name="target">main</field>
+    </record>
+
+    <record id="action_new_payroll_generation" model="ir.actions.client">
+        <field name="name">New Payroll Generation</field>
+        <field name="tag">kio_payroll_overview.new_payroll_generation</field>
+        <field name="target">main</field>
+    </record>
+
+
+    <menuitem id="menu_payroll_root"
+              name="Payroll"
+              sequence="1"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"/>
+
+    <menuitem id="menu_payroll_overview"
+              name="Payroll Overview"
+              parent="menu_payroll_root"
+              action="action_payroll_overview"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="1"/>
+</odoo>

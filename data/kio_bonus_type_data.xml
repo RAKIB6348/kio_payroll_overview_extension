@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="kio_bonus_type_festival" model="kio.bonus.type">
+        <field name="name">Festival Bonus</field>
+        <field name="sequence">10</field>
+        <field name="active">True</field>
+    </record>
+    <record id="kio_bonus_type_performance" model="kio.bonus.type">
+        <field name="name">Performance Bonus</field>
+        <field name="sequence">20</field>
+        <field name="active">True</field>
+    </record>
+    <record id="kio_bonus_type_attendance" model="kio.bonus.type">
+        <field name="name">Attendance Bonus</field>
+        <field name="sequence">30</field>
+        <field name="active">True</field>
+    </record>
+    <record id="kio_bonus_type_incentive" model="kio.bonus.type">
+        <field name="name">Incentive Bonus</field>
+        <field name="sequence">40</field>
+        <field name="active">True</field>
+    </record>
+    <record id="kio_bonus_type_other" model="kio.bonus.type">
+        <field name="name">Other Bonus</field>
+        <field name="sequence">50</field>
+        <field name="active">True</field>
+    </record>
+</odoo>

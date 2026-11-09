@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_kio_bonus_type_tree" model="ir.ui.view">
+        <field name="name">kio.bonus.type.tree</field>
+        <field name="model">kio.bonus.type</field>
+        <field name="arch" type="xml">
+            <tree editable="bottom">
+                <field name="sequence" widget="handle"/>
+                <field name="name"/>
+                <field name="company_id" groups="base.group_multi_company" optional="show"/>
+                <field name="active"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_kio_bonus_type_form" model="ir.ui.view">
+        <field name="name">kio.bonus.type.form</field>
+        <field name="model">kio.bonus.type</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="sequence"/>
+                        </group>
+                        <group>
+                            <field name="active"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_kio_bonus_type_search" model="ir.ui.view">
+        <field name="name">kio.bonus.type.search</field>
+        <field name="model">kio.bonus.type</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <filter name="inactive" string="Archived" domain="[('active', '=', False)]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_kio_bonus_type" model="ir.actions.act_window">
+        <field name="name">Bonus Types</field>
+        <field name="res_model">kio.bonus.type</field>
+        <field name="view_mode">tree,form</field>
+        <field name="search_view_id" ref="view_kio_bonus_type_search"/>
+    </record>
+
+    <menuitem id="menu_kio_bonus_type"
+              name="Bonus Types"
+              parent="menu_kio_payroll_configuration"
+              action="action_kio_bonus_type"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="10"/>
+</odoo>

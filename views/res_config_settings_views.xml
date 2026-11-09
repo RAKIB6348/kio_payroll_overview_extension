@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_kio_payroll" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.kio.payroll</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="50"/>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app data-string="Payroll Overview"
+                     string="Payroll Overview"
+                     name="kio_payroll_overview_extension">
+                    <field name="company_id" invisible="1"/>
+                    <block title="Payroll Accounting Configuration"
+                           name="kio_payroll_accounting_setting_container">
+                        <setting string="Salary Journal"
+                                 company_dependent="1"
+                                 help="Miscellaneous journal used for payroll accounting entries.">
+                            <field name="salary_journal_id"
+                                   options="{'no_create': True}"/>
+                        </setting>
+                        <setting string="Salary Debit Account"
+                                 company_dependent="1"
+                                 help="Expense account debited for salary expense.">
+                            <field name="salary_debit_account_id"
+                                   options="{'no_create': True}"/>
+                        </setting>
+                        <setting string="Salary Credit Account"
+                                 company_dependent="1"
+                                 help="Liability account credited for salary payable.">
+                            <field name="salary_credit_account_id"
+                                   options="{'no_create': True}"/>
+                        </setting>
+                    </block>
+                    <block title="Attendance Overtime Policy"
+                           name="kio_overtime_policy_setting_container">
+                        <setting string="Enable Overtime Monetary Calculation"
+                                 company_dependent="1"
+                                 help="Default policy: overtime hours are calculated automatically from attendance, but monetary overtime amount is only calculated when this is explicitly enabled.">
+                            <field name="kio_overtime_monetary_enabled"/>
+                        </setting>
+                        <setting string="Overtime Multiplier"
+                                 company_dependent="1"
+                                 help="Multiplier used for overtime amount (e.g. 1.5). Amount = Overtime Hours × Hourly Rate × Multiplier. Hourly Rate = Monthly Wage / Monthly Scheduled Working Hours. Applied only when monetary calculation is enabled.">
+                            <field name="kio_overtime_multiplier"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="action_kio_payroll_config_settings" model="ir.actions.act_window">
+        <field name="name">Settings</field>
+        <field name="res_model">res.config.settings</field>
+        <field name="view_mode">form</field>
+        <field name="target">inline</field>
+        <field name="context">{'module': 'kio_payroll_overview_extension', 'bin_size': False}</field>
+    </record>
+
+    <menuitem id="menu_kio_payroll_configuration"
+              name="Configuration"
+              parent="menu_payroll_root"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager,account.group_account_manager,base.group_system"
+              sequence="100"/>
+
+    <menuitem id="menu_kio_payroll_settings"
+              name="Settings"
+              parent="menu_kio_payroll_configuration"
+              action="action_kio_payroll_config_settings"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager,account.group_account_manager,base.group_system"
+              sequence="1"/>
+</odoo>

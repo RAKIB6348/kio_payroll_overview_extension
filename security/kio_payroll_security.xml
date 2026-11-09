@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="module_category_kio_payroll" model="ir.module.category">
+        <field name="name">KIO Payroll</field>
+        <field name="description">Independent payroll access rights.</field>
+        <field name="sequence">35</field>
+    </record>
+
+    <record id="group_kio_payroll_user" model="res.groups">
+        <field name="name">Payroll User</field>
+        <field name="category_id" ref="module_category_kio_payroll"/>
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+
+    <record id="group_kio_payroll_manager" model="res.groups">
+        <field name="name">Payroll Manager</field>
+        <field name="category_id" ref="module_category_kio_payroll"/>
+        <field name="implied_ids" eval="[(4, ref('group_kio_payroll_user'))]"/>
+        <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+    </record>
+
+    <record id="rule_kio_bonus_company" model="ir.rule">
+        <field name="name">Bonus: multi-company</field>
+        <field name="model_id" ref="model_kio_bonus"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_bonus_line_company" model="ir.rule">
+        <field name="name">Bonus lines: multi-company</field>
+        <field name="model_id" ref="model_kio_bonus_line"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_bonus_type_company" model="ir.rule">
+        <field name="name">Bonus types: multi-company</field>
+        <field name="model_id" ref="model_kio_bonus_type"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_payroll_batch_company" model="ir.rule">
+        <field name="name">KIO payroll batch: multi-company</field>
+        <field name="model_id" ref="model_kio_payroll_batch"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_payroll_payslip_company" model="ir.rule">
+        <field name="name">KIO payroll payslip: multi-company</field>
+        <field name="model_id" ref="model_kio_payroll_payslip"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_payroll_payslip_line_company" model="ir.rule">
+        <field name="name">KIO payroll payslip line: multi-company</field>
+        <field name="model_id" ref="model_kio_payroll_payslip_line"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_payroll_salary_config_company" model="ir.rule">
+        <field name="name">KIO payroll salary config: multi-company</field>
+        <field name="model_id" ref="model_kio_payroll_salary_config"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_overtime_company" model="ir.rule">
+        <field name="name">Overtime: multi-company</field>
+        <field name="model_id" ref="model_kio_overtime"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_commission_company" model="ir.rule">
+        <field name="name">Commission: multi-company</field>
+        <field name="model_id" ref="model_kio_commission"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
+    <record id="rule_kio_deduction_company" model="ir.rule">
+        <field name="name">Deduction: multi-company</field>
+        <field name="model_id" ref="model_kio_deduction"/>
+        <field name="global" eval="True"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+</odoo>

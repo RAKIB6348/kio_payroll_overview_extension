@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_kio_bonus_list" model="ir.ui.view">
+        <field name="name">kio.bonus.list</field>
+        <field name="model">kio.bonus</field>
+        <field name="type">tree</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+                <field name="bonus_type_id"/>
+                <field name="payment_scope"/>
+                <field name="bonus_date"/>
+                <field name="total_employees"/>
+                <field name="total_bonus" widget="monetary"/>
+                <field name="currency_id" invisible="1"/>
+                <field name="state"
+                       widget="badge"
+                       decoration-info="state == 'draft'"
+                       decoration-success="state == 'confirmed'"
+                       decoration-danger="state == 'cancelled'"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_kio_bonus_form" model="ir.ui.view">
+        <field name="name">kio.bonus.form</field>
+        <field name="model">kio.bonus</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button name="action_confirm"
+                            type="object"
+                            string="Confirm"
+                            class="btn-primary"
+                            invisible="state != 'draft'"/>
+                    <button name="action_cancel"
+                            type="object"
+                            string="Cancel"
+                            invisible="state == 'cancelled'"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="draft,confirmed,cancelled"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <label for="name" string="Bonus Name"/>
+                        <h1>
+                            <field name="name" placeholder="e.g. Festival Bonus 2026"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Bonus Information">
+                            <field name="bonus_type_id" options="{'no_create_edit': True}"/>
+                            <field name="bonus_date"/>
+                            <field name="payment_scope"/>
+                            <field name="department_id"
+                                   invisible="payment_scope != 'department'"
+                                   required="payment_scope == 'department'"/>
+                            <field name="employee_ids"
+                                   widget="many2many_tags"
+                                   invisible="payment_scope != 'individual'"
+                                   required="payment_scope == 'individual'"
+                                   options="{'no_create_edit': True}"/>
+                        </group>
+                        <group string="Calculation">
+                            <field name="calculation_type"/>
+                            <field name="amount"
+                                   invisible="calculation_type != 'fixed'"
+                                   required="calculation_type == 'fixed'"/>
+                            <field name="percentage"
+                                   invisible="calculation_type != 'percentage'"
+                                   required="calculation_type == 'percentage'"/>
+                            <field name="currency_id" invisible="1"/>
+                            <field name="company_id" invisible="1"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Employee Bonus Details" name="employee_bonus_details">
+                            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                                <button name="action_generate_employees"
+                                        type="object"
+                                        string="Generate Employees"
+                                        class="btn-success"
+                                        invisible="state != 'draft'"/>
+                                <div class="d-flex flex-wrap gap-3">
+                                    <span class="text-muted">
+                                        Total Employees:
+                                        <field name="total_employees" class="oe_inline fw-bold"/>
+                                    </span>
+                                    <span class="text-muted">
+                                        Total Bonus Amount:
+                                        <field name="total_bonus"
+                                               class="oe_inline fw-bold"
+                                               widget="monetary"/>
+                                    </span>
+                                </div>
+                            </div>
+                            <field name="line_ids" readonly="state != 'draft'">
+                                <tree editable="bottom" create="false">
+                                    <field name="currency_id" column_invisible="1"/>
+                                    <field name="employee_id" readonly="1"
+                                           options="{'no_create': True}"/>
+                                    <field name="department_id" readonly="1"/>
+                                    <field name="basic_salary" readonly="1" sum="Total"/>
+                                    <field name="bonus_amount" readonly="1" sum="Total"/>
+                                    <field name="applied_payslip_id" column_invisible="1"/>
+                                </tree>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_kio_bonus_search" model="ir.ui.view">
+        <field name="name">kio.bonus.search</field>
+        <field name="model">kio.bonus</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="bonus_type_id"/>
+                <field name="employee_ids"/>
+                <field name="department_id"/>
+                <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                <filter name="confirmed" string="Confirmed" domain="[('state', '=', 'confirmed')]"/>
+                <filter name="cancelled" string="Cancelled" domain="[('state', '=', 'cancelled')]"/>
+                <group expand="0" string="Group By">
+                    <filter name="group_state" string="Status"
+                            context="{'group_by': 'state'}"/>
+                    <filter name="group_type" string="Bonus Type"
+                            context="{'group_by': 'bonus_type_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_kio_bonus" model="ir.actions.act_window">
+        <field name="name">Bonus Management</field>
+        <field name="res_model">kio.bonus</field>
+        <field name="view_mode">tree,form</field>
+        <field name="search_view_id" ref="view_kio_bonus_search"/>
+        <field name="target">current</field>
+    </record>
+
+    <menuitem id="menu_payroll_management"
+              name="Payroll Management"
+              parent="menu_payroll_root"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="2"/>
+
+    <menuitem id="menu_kio_bonus"
+              name="Bonus Management"
+              parent="menu_payroll_management"
+              action="action_kio_bonus"
+              groups="kio_payroll_overview_extension.group_kio_payroll_manager"
+              sequence="1"/>
+</odoo>

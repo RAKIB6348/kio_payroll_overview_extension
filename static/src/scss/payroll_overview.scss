@@ -1,0 +1,326 @@
+.o_kio_payroll_overview {
+    background: var(--o-view-background-color, #f8f9fa);
+
+    .o_payroll_filters {
+        justify-content: flex-end;
+
+        .form-select {
+            min-width: 8rem;
+            width: auto;
+        }
+    }
+
+    .o_payroll_kpi {
+        border-left: 0.25rem solid var(--o-brand-primary) !important;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+        &:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.08) !important;
+        }
+
+        .card-body {
+            display: flex;
+            min-height: 8.5rem;
+            flex-direction: column;
+            justify-content: center;
+            padding: 1.25rem 1.5rem;
+        }
+
+        .o_payroll_kpi_icon {
+            margin-bottom: 0.5rem;
+            color: var(--o-brand-primary);
+            font-size: 1.35rem;
+            line-height: 1;
+        }
+
+        .o_payroll_kpi_label {
+            display: block;
+            margin-bottom: 0.35rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        }
+
+        strong {
+            display: block;
+            color: var(--o-main-text-color, #212529);
+            font-size: clamp(1.35rem, 2vw, 1.85rem);
+            line-height: 1.2;
+            overflow-wrap: anywhere;
+        }
+    }
+
+    .o_kpi_salary {
+        border-left-color: #714b67 !important;
+        background: linear-gradient(135deg, #ffffff 0%, #f4eef3 100%) !important;
+
+        .o_payroll_kpi_icon {
+            color: #714b67;
+        }
+    }
+
+    .o_kpi_employees {
+        cursor: pointer;
+        background: linear-gradient(135deg, #ffffff 0%, #f1edf4 100%) !important;
+
+        &:focus-visible {
+            outline: 2px solid var(--o-brand-primary);
+            outline-offset: 2px;
+        }
+    }
+
+    .o_kpi_paid {
+        cursor: pointer;
+        border-left-color: #28a745 !important;
+        background: linear-gradient(135deg, #ffffff 0%, #edf8f0 100%) !important;
+
+        &:focus-visible {
+            outline: 2px solid #28a745;
+            outline-offset: 2px;
+        }
+
+        &.o_kpi_active {
+            box-shadow: 0 0 0 2px #28a745, 0 0.5rem 1rem rgba(40, 167, 69, 0.15) !important;
+        }
+
+        .o_payroll_kpi_icon {
+            color: #28a745;
+        }
+    }
+
+    .o_kpi_unpaid {
+        cursor: pointer;
+        border-left-color: #dc3545 !important;
+        background: linear-gradient(135deg, #ffffff 0%, #fdeff1 100%) !important;
+
+        &:focus-visible {
+            outline: 2px solid #dc3545;
+            outline-offset: 2px;
+        }
+
+        &.o_kpi_active {
+            box-shadow: 0 0 0 2px #dc3545, 0 0.5rem 1rem rgba(220, 53, 69, 0.15) !important;
+        }
+
+        .o_payroll_kpi_icon {
+            color: #dc3545;
+        }
+    }
+
+    .o_kpi_basic {
+        border-left-color: #17a2b8 !important;
+        background: linear-gradient(135deg, #ffffff 0%, #eaf8fa 100%) !important;
+
+        .o_payroll_kpi_icon {
+            color: #17a2b8;
+        }
+    }
+
+    .o_kpi_allowance {
+        border-left-color: #007bff !important;
+        background: linear-gradient(135deg, #ffffff 0%, #eaf2ff 100%) !important;
+
+        .o_payroll_kpi_icon {
+            color: #007bff;
+        }
+    }
+
+    .o_kpi_overtime {
+        border-left-color: #fd7e14 !important;
+        background: linear-gradient(135deg, #ffffff 0%, #fff2e7 100%) !important;
+
+        .o_payroll_kpi_icon {
+            color: #fd7e14;
+        }
+    }
+
+    .o_kpi_bonus {
+        border-left-color: #6f42c1 !important;
+        background: linear-gradient(135deg, #ffffff 0%, #f3eefb 100%) !important;
+
+        .o_payroll_kpi_icon {
+            color: #6f42c1;
+        }
+    }
+
+    .o_payroll_form_card {
+        .card-header {
+            border-bottom: 1px solid #eef0f3;
+        }
+    }
+
+    .o_payroll_period_stat {
+        display: flex;
+        min-height: 4.25rem;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0.75rem 1rem;
+        border: 1px solid #e7eaee;
+        border-radius: 0.5rem;
+        background: #f8f9fb;
+
+        span {
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+
+        strong {
+            margin-top: 0.2rem;
+            color: var(--o-main-text-color, #212529);
+            font-size: 1.25rem;
+            line-height: 1.2;
+        }
+    }
+
+    .o_payroll_employee_search {
+        width: 18rem;
+        max-width: 100%;
+    }
+
+    .o_payroll_run_table {
+        min-width: 90rem;
+
+        thead th {
+            padding-block: 0.85rem;
+            border-bottom-width: 1px;
+            background: #f7f8fa;
+            color: #5f6670;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.025em;
+            text-transform: uppercase;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+
+        tbody td {
+            padding-block: 0.75rem;
+        }
+
+        .o_payroll_checkbox_cell {
+            width: 3rem;
+            padding-inline: 1rem 0.5rem;
+            text-align: center;
+        }
+
+        .o_payroll_employee {
+            min-width: 15rem;
+            max-width: 22rem;
+        }
+
+        .o_payroll_employee_avatar {
+            width: 2.4rem;
+            height: 2.4rem;
+            border: 1px solid #e4e7eb;
+            object-fit: cover;
+        }
+
+        .o_payroll_department_badge {
+            max-width: 13rem;
+            overflow: hidden;
+            background: #eef3ff;
+            color: #5067a8;
+            font-weight: 500;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .o_payroll_selected_row > td {
+            background-color: rgba(113, 75, 103, 0.045);
+        }
+    }
+
+    .o_payroll_loading {
+        min-height: 18rem;
+    }
+
+    .o_payroll_generation_card {
+        max-width: 90rem;
+        margin-inline: auto;
+
+        .form-control.bg-light {
+            min-height: calc(1.5em + 0.75rem + 2px);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
+    .o_payroll_recent_batches {
+        .o_payroll_batch_card {
+            cursor: pointer;
+            border-left: 0.25rem solid var(--o-brand-primary) !important;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+            &:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.08) !important;
+            }
+
+            &:focus-visible {
+                outline: 2px solid var(--o-brand-primary);
+                outline-offset: 2px;
+            }
+
+            .card-body {
+                padding: 1.1rem 1.15rem;
+            }
+        }
+
+        .o_payroll_batch_meta {
+            dt,
+            dd {
+                line-height: 1.35;
+            }
+        }
+    }
+
+    .o_kio_payroll_batch_details {
+        .btn-success {
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            box-shadow: 0 1px 2px rgba(40, 167, 69, 0.2);
+            transition: all 0.15s ease-in-out;
+
+            &:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 3px 6px rgba(40, 167, 69, 0.3);
+            }
+        }
+
+        .btn-primary {
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            box-shadow: 0 1px 2px rgba(13, 110, 253, 0.2);
+            transition: all 0.15s ease-in-out;
+
+            &:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 3px 6px rgba(13, 110, 253, 0.3);
+            }
+        }
+    }
+
+    @media (max-width: 575.98px) {
+        .o_payroll_filters {
+            width: 100%;
+            justify-content: stretch;
+
+            .form-select {
+                flex: 1 1 7rem;
+                min-width: 0;
+            }
+
+            .btn {
+                flex: 1 1 100%;
+            }
+        }
+    }
+}

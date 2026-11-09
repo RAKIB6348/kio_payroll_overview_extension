@@ -1,0 +1,876 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="kio_payroll_overview_extension.PayrollOverview">
+        <div class="o_kio_payroll_overview h-100 overflow-auto">
+            <div class="container-fluid py-4">
+                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-4">
+                    <div>
+                        <h1 class="h3 mb-1">Payroll Overview</h1>
+                        <p class="text-muted mb-0" t-if="state.data">
+                            <t t-esc="state.data.company.name"/> · Payroll summary for the selected period
+                        </p>
+                    </div>
+                    <div class="o_payroll_filters d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-success text-nowrap" t-on-click="openBonusManagement">
+                            <i class="fa fa-gift me-1" aria-hidden="true"/> Bonus
+                        </button>
+                        <button type="button" class="btn btn-primary text-nowrap" t-on-click="openNewPayrollGeneration">
+                            <i class="fa fa-plus-circle me-1" aria-hidden="true"/> New Payroll Generation
+                        </button>
+                        <select class="form-select" aria-label="Month" t-model.number="state.month" t-on-change="onFilterChange">
+                            <option t-foreach="months" t-as="month" t-key="month[0]" t-att-value="month[0]">
+                                <t t-esc="month[1]"/>
+                            </option>
+                        </select>
+                        <select class="form-select" aria-label="Year" t-model.number="state.year" t-on-change="onFilterChange">
+                            <option t-foreach="years" t-as="year" t-key="year" t-att-value="year">
+                                <t t-esc="year"/>
+                            </option>
+                        </select>
+                    </div>
+                </div>
+
+                <div t-if="state.loading" class="o_payroll_loading d-flex flex-column align-items-center justify-content-center py-5">
+                    <i class="fa fa-spinner fa-spin fa-2x text-primary mb-3" role="img" aria-label="Loading"/>
+                    <span class="text-muted">Loading payroll data…</span>
+                </div>
+
+                <div t-elif="state.error" class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+                    <span>Payroll Overview could not be loaded.</span>
+                    <button type="button" class="btn btn-outline-danger btn-sm" t-on-click="loadDashboard">Retry</button>
+                </div>
+
+                <t t-elif="state.data">
+                    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_employees"
+                                 role="button" tabindex="0" aria-label="Open Employees"
+                                 t-on-click="openEmployees" t-on-keydown="onEmployeeKpiKeydown">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-users" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Employees</span>
+                                    <strong t-esc="state.data.kpis.total_employees"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_salary">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-money" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.kpis.total_salary != null ? state.data.kpis.total_salary : state.data.kpis.net_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_paid"
+                                 role="button" tabindex="0" aria-label="Toggle Paid Employees"
+                                 t-att-class="{'o_kpi_active': state.showPaidEmployees}"
+                                 t-on-click="togglePaidEmployees" t-on-keydown="onPaidKpiKeydown">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-check-circle" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Paid Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.kpis.total_paid_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_unpaid"
+                                 role="button" tabindex="0" aria-label="Toggle Unpaid Employees"
+                                 t-att-class="{'o_kpi_active': state.showUnpaidEmployees}"
+                                 t-on-click="toggleUnpaidEmployees" t-on-keydown="onUnpaidKpiKeydown">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-exclamation-circle" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Unpaid Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.kpis.total_unpaid_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_basic">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-id-badge" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Basic Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.kpis.basic_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_allowance">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-credit-card" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Allowance</span>
+                                    <strong t-esc="formatCurrency(state.data.kpis.total_allowance)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_overtime">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-clock-o" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Overtime</span>
+                                    <strong t-esc="formatCurrency(state.data.employee_payroll_details?.totals?.overtime)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_bonus">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-gift" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Bonuses</span>
+                                    <strong t-esc="formatCurrency(state.data.employee_payroll_details?.totals?.bonus)"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <section class="o_payroll_recent_batches mt-2" aria-label="Recent Payroll Batches">
+                        <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
+                            <h2 class="h5 mb-0">Recent Payroll Batches</h2>
+                        </div>
+                        <div t-if="!state.data.recent_batches.length" class="alert alert-light border text-muted mb-0" role="status">
+                            No payroll batches found for the selected period.
+                        </div>
+                        <div t-else="" class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
+                            <div class="col" t-foreach="state.data.recent_batches" t-as="batch" t-key="batch.id">
+                                <article class="o_payroll_batch_card card h-100 border-0 shadow-sm" role="button" tabindex="0"
+                                         t-att-aria-label="'Open payroll batch ' + batch.name"
+                                         t-on-click="() => this.openBatch(batch.id)"
+                                         t-on-keydown="(ev) => this.onBatchKeydown(ev, batch.id)">
+                                    <div class="card-body d-flex flex-column">
+                                        <div class="d-flex align-items-start justify-content-between gap-2 mb-3">
+                                            <h3 class="h6 fw-bold mb-0 text-truncate" t-att-title="batch.name" t-esc="batch.name"/>
+                                            <span t-attf-class="badge rounded-pill #{batchStatusClass(batch.state)}" t-esc="batch.state_label"/>
+                                        </div>
+                                        <dl class="o_payroll_batch_meta row g-2 mb-0 small">
+                                            <dt class="col-5 text-muted fw-normal">Period</dt>
+                                            <dd class="col-7 mb-0 text-end">
+                                                <t t-esc="formatDate(batch.date_start)"/> – <t t-esc="formatDate(batch.date_end)"/>
+                                            </dd>
+                                            <dt class="col-5 text-muted fw-normal">Payment Date</dt>
+                                            <dd class="col-7 mb-0 text-end" t-esc="formatDate(batch.payment_date)"/>
+                                            <dt class="col-5 text-muted fw-normal">Total Employees</dt>
+                                            <dd class="col-7 mb-0 text-end fw-semibold" t-esc="batch.total_employees"/>
+                                            <dt class="col-5 text-muted fw-normal">Total Net Pay</dt>
+                                            <dd class="col-7 mb-0 text-end fw-semibold" t-esc="formatCurrency(batch.total_net_pay)"/>
+                                        </dl>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section t-if="state.showPaidEmployees" class="o_payroll_paid_employees mt-4" aria-label="Paid Employees">
+                        <div class="card border-0 shadow-sm o_payroll_employees_card">
+                            <div class="card-header bg-white py-3">
+                                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                                    <div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <h2 class="h5 mb-0">Paid Employees</h2>
+                                            <span class="badge rounded-pill text-bg-success" t-esc="paidEmployeesSummary.count"/>
+                                        </div>
+                                        <p class="text-muted mb-0 mt-1 small">
+                                            <t t-esc="filteredPaidEmployees.length"/> of <t t-esc="paidEmployeesSummary.count"/> paid employees · Total Paid: <strong class="text-success" t-esc="formatCurrency(filteredPaidEmployeesTotals.paid_amount)"/>
+                                        </p>
+                                    </div>
+                                    <div class="d-flex flex-column flex-sm-row flex-wrap gap-2">
+                                        <div class="input-group o_payroll_employee_search">
+                                            <span class="input-group-text"><i class="fa fa-search" aria-hidden="true"/></span>
+                                            <input type="search" class="form-control" placeholder="Search employee…"
+                                                   aria-label="Search employee" t-model="state.paidSearch"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <t t-if="!paidEmployees.length">
+                                    <div class="alert alert-light border text-muted m-3" role="status">
+                                        No paid employees found for the selected period.
+                                    </div>
+                                </t>
+                                <t t-elif="filteredPaidEmployees.length">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle mb-0 o_payroll_run_table">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Employee</th>
+                                                    <th>Department</th>
+                                                    <th>Payroll Batch</th>
+                                                    <th class="text-end text-nowrap">Net Salary (BDT)</th>
+                                                    <th class="text-end text-nowrap">Paid Amount (BDT)</th>
+                                                    <th class="text-center text-nowrap">Payment Date</th>
+                                                    <th class="text-center text-nowrap">Payment Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr t-foreach="filteredPaidEmployees" t-as="row" t-key="row.slip_id">
+                                                    <td>
+                                                        <div class="o_payroll_employee d-flex align-items-center gap-2">
+                                                            <img class="o_payroll_employee_avatar rounded-circle flex-shrink-0"
+                                                                 t-att-src="row.avatar_url"
+                                                                 t-att-alt="row.name"
+                                                                 t-on-error="onAvatarError"/>
+                                                            <div class="min-w-0">
+                                                                <div class="fw-bold text-truncate" t-esc="row.name"/>
+                                                                <div class="text-muted small text-truncate" t-esc="row.identification_id"/>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td><span class="badge rounded-pill o_payroll_department_badge" t-esc="row.department"/></td>
+                                                    <td>
+                                                        <t t-if="row.batch_id">
+                                                            <a href="#" role="button" class="fw-semibold text-truncate d-inline-block text-decoration-none"
+                                                               style="max-width: 14rem;"
+                                                               t-on-click.prevent="() => this.openBatch(row.batch_id)"
+                                                               t-att-title="row.batch_name"
+                                                               t-esc="row.batch_name"/>
+                                                        </t>
+                                                        <t t-else="">
+                                                            <span class="fw-semibold text-truncate d-inline-block" style="max-width: 14rem;" t-esc="row.batch_name"/>
+                                                        </t>
+                                                    </td>
+                                                    <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.net_salary)"/>
+                                                    <td class="text-end text-nowrap fw-bold text-success" t-esc="formatAmount(row.paid_amount)"/>
+                                                    <td class="text-center text-nowrap" t-esc="formatDate(row.payment_date)"/>
+                                                    <td class="text-center text-nowrap">
+                                                        <span t-attf-class="badge rounded-pill #{row.payment_state === 'paid' ? 'text-bg-success' : 'text-bg-warning'}"
+                                                              t-esc="row.payment_state_label"/>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                            <tfoot class="table-light fw-bold">
+                                                <tr>
+                                                    <td>Total</td>
+                                                    <td/>
+                                                    <td/>
+                                                    <td class="text-end text-nowrap" t-esc="formatAmount(filteredPaidEmployeesTotals.net_salary)"/>
+                                                    <td class="text-end text-nowrap text-success" t-esc="formatAmount(filteredPaidEmployeesTotals.paid_amount)"/>
+                                                    <td/>
+                                                    <td/>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <div class="text-center py-5 px-3">
+                                        <i class="fa fa-users fa-3x text-muted mb-3" aria-hidden="true"/>
+                                        <h3 class="h6">No employees found</h3>
+                                        <p class="text-muted mb-0">No paid employees match the search criteria.</p>
+                                    </div>
+                                </t>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section t-if="state.showUnpaidEmployees" class="o_payroll_unpaid_employees mt-4" aria-label="Unpaid Employees">
+                        <div class="card border-0 shadow-sm o_payroll_employees_card">
+                            <div class="card-header bg-white py-3">
+                                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                                    <div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <h2 class="h5 mb-0">Unpaid Employees</h2>
+                                            <span class="badge rounded-pill text-bg-danger" t-esc="unpaidEmployeesSummary.count"/>
+                                        </div>
+                                        <p class="text-muted mb-0 mt-1 small">
+                                            <t t-esc="filteredUnpaidEmployees.length"/> of <t t-esc="unpaidEmployeesSummary.count"/> unpaid employees · Total Unpaid: <strong class="text-danger" t-esc="formatCurrency(filteredUnpaidEmployeesTotals.unpaid_amount)"/>
+                                        </p>
+                                    </div>
+                                    <div class="d-flex flex-column flex-sm-row flex-wrap gap-2">
+                                        <div class="input-group o_payroll_employee_search">
+                                            <span class="input-group-text"><i class="fa fa-search" aria-hidden="true"/></span>
+                                            <input type="search" class="form-control" placeholder="Search employee…"
+                                                   aria-label="Search employee" t-model="state.unpaidSearch"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <t t-if="!unpaidEmployees.length">
+                                    <div class="alert alert-light border text-muted m-3" role="status">
+                                        No unpaid employees found for the selected period.
+                                    </div>
+                                </t>
+                                <t t-elif="filteredUnpaidEmployees.length">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle mb-0 o_payroll_run_table">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Employee</th>
+                                                    <th>Department</th>
+                                                    <th>Payroll Batch</th>
+                                                    <th class="text-end text-nowrap">Basic Salary (BDT)</th>
+                                                    <th class="text-end text-nowrap">Allowances (BDT)</th>
+                                                    <th class="text-end text-nowrap">Bonuses (BDT)</th>
+                                                    <th class="text-end text-nowrap">Deductions (BDT)</th>
+                                                    <th class="text-end text-nowrap">Net Pay (BDT)</th>
+                                                    <th class="text-center text-nowrap">Payment Status</th>
+                                                    <th class="text-center text-nowrap">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr t-foreach="filteredUnpaidEmployees" t-as="row" t-key="row.slip_id">
+                                                    <td>
+                                                        <div class="o_payroll_employee d-flex align-items-center gap-2">
+                                                            <img class="o_payroll_employee_avatar rounded-circle flex-shrink-0"
+                                                                 t-att-src="row.avatar_url"
+                                                                 t-att-alt="row.name"
+                                                                 t-on-error="onAvatarError"/>
+                                                            <div class="min-w-0">
+                                                                <div class="fw-bold text-truncate" t-esc="row.name"/>
+                                                                <div class="text-muted small text-truncate" t-esc="row.identification_id"/>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td><span class="badge rounded-pill o_payroll_department_badge" t-esc="row.department"/></td>
+                                                    <td>
+                                                        <t t-if="row.batch_id">
+                                                            <a href="#" role="button" class="fw-semibold text-truncate d-inline-block text-decoration-none"
+                                                               style="max-width: 14rem;"
+                                                               t-on-click.prevent="() => this.openBatch(row.batch_id)"
+                                                               t-att-title="row.batch_name"
+                                                               t-esc="row.batch_name"/>
+                                                        </t>
+                                                        <t t-else="">
+                                                            <span class="fw-semibold text-truncate d-inline-block" style="max-width: 14rem;" t-esc="row.batch_name"/>
+                                                        </t>
+                                                    </td>
+                                                    <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.basic_salary)"/>
+                                                    <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.allowance)"/>
+                                                    <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.bonus)"/>
+                                                    <td class="text-end text-nowrap fw-semibold text-danger" t-esc="formatAmount(row.deduction)"/>
+                                                    <td class="text-end text-nowrap fw-bold text-success">
+                                                        <div t-esc="formatAmount(row.net_pay)"/>
+                                                        <t t-if="row.payment_state === 'partial'">
+                                                            <div class="small fw-normal text-danger">Unpaid: <t t-esc="formatAmount(row.unpaid_amount)"/></div>
+                                                        </t>
+                                                    </td>
+                                                    <td class="text-center text-nowrap">
+                                                        <span t-attf-class="badge rounded-pill #{row.paid ? 'text-bg-success' : (row.payment_state === 'partial' ? 'text-bg-warning' : 'text-bg-secondary')}"
+                                                              t-esc="row.payment_state_label"/>
+                                                    </td>
+                                                    <td class="text-center text-nowrap">
+                                                        <button type="button" class="btn btn-success btn-sm text-nowrap"
+                                                                t-att-disabled="row.paid"
+                                                                t-on-click="() => this.onPayNow(row)">
+                                                            Pay Now
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                            <tfoot class="table-light fw-bold">
+                                                <tr>
+                                                    <td>Total</td>
+                                                    <td/>
+                                                    <td/>
+                                                    <td class="text-end text-nowrap" t-esc="formatAmount(filteredUnpaidEmployeesTotals.basic_salary)"/>
+                                                    <td class="text-end text-nowrap" t-esc="formatAmount(filteredUnpaidEmployeesTotals.allowance)"/>
+                                                    <td class="text-end text-nowrap" t-esc="formatAmount(filteredUnpaidEmployeesTotals.bonus)"/>
+                                                    <td class="text-end text-nowrap text-danger" t-esc="formatAmount(filteredUnpaidEmployeesTotals.deduction)"/>
+                                                    <td class="text-end text-nowrap text-success" t-esc="formatAmount(filteredUnpaidEmployeesTotals.net_pay)"/>
+                                                    <td/>
+                                                    <td/>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <div class="text-center py-5 px-3">
+                                        <i class="fa fa-users fa-3x text-muted mb-3" aria-hidden="true"/>
+                                        <h3 class="h6">No employees found</h3>
+                                        <p class="text-muted mb-0">No unpaid employees match the search criteria.</p>
+                                    </div>
+                                </t>
+                            </div>
+                        </div>
+                    </section>
+                </t>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="kio_payroll_overview_extension.NewPayrollGeneration">
+        <div class="o_kio_payroll_overview o_kio_new_payroll_run h-100 overflow-auto">
+            <div class="container-fluid py-4">
+                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-4">
+                    <div class="d-flex flex-wrap align-items-center gap-3">
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" t-on-click="backToOverview">
+                            <i class="fa fa-arrow-left me-1" aria-hidden="true"/> Back
+                        </button>
+                        <div>
+                            <h1 class="h3 mb-1">New Payroll Run</h1>
+                            <p class="text-muted mb-0">Create a payroll batch and generate payslips for the selected employees.</p>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap justify-content-end gap-2">
+                        <button type="button" class="btn btn-danger" t-on-click="cancelPayroll">
+                            <i class="fa fa-times me-1" aria-hidden="true"/> Cancel
+                        </button>
+                        <button type="button" class="btn btn-primary" t-on-click="generatePayroll"
+                                t-att-disabled="state.generating || !selectedCount">
+                            <i t-if="state.generating" class="fa fa-spinner fa-spin me-1" aria-hidden="true"/>
+                            <i t-else="" class="fa fa-cogs me-1" aria-hidden="true"/>
+                            Generate
+                        </button>
+                    </div>
+                </div>
+
+                <div t-if="state.loading &amp;&amp; !state.data" class="o_payroll_loading d-flex flex-column align-items-center justify-content-center py-5">
+                    <i class="fa fa-spinner fa-spin fa-2x text-primary mb-3" role="img" aria-label="Loading"/>
+                    <span class="text-muted">Loading payroll information…</span>
+                </div>
+                <div t-elif="state.error &amp;&amp; !state.data" class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+                    <span t-esc="state.error"/>
+                    <button type="button" class="btn btn-outline-danger btn-sm" t-on-click="() => this.loadData()">Retry</button>
+                </div>
+
+                <t t-elif="state.data">
+                    <div class="row g-3 mb-4">
+                        <div class="col-12 col-xl-6">
+                            <div class="card border-0 shadow-sm o_payroll_form_card h-100">
+                                <div class="card-header bg-white py-3">
+                                    <h2 class="h5 mb-0">Payroll Information</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold" for="o_new_payroll_name">
+                                            Payroll Name <span class="text-danger">*</span>
+                                        </label>
+                                        <input id="o_new_payroll_name" type="text" class="form-control"
+                                               required="required" placeholder="November 2026 Payroll"
+                                               t-model="state.form.name"/>
+                                    </div>
+                                    <div class="row g-3">
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label fw-semibold" for="o_new_payroll_type">
+                                                Type <span class="text-danger">*</span>
+                                            </label>
+                                            <select id="o_new_payroll_type" class="form-select"
+                                                    required="required" t-model="state.form.payroll_type">
+                                                <option value="monthly">Monthly Payroll</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label fw-semibold" for="o_new_payroll_payment_date">
+                                                Payment Date <span class="text-danger">*</span>
+                                            </label>
+                                            <input id="o_new_payroll_payment_date" type="date" class="form-control"
+                                                   required="required" t-model="state.form.payment_date"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-xl-6">
+                            <div class="card border-0 shadow-sm o_payroll_form_card h-100">
+                                <div class="card-header bg-white py-3">
+                                    <h2 class="h5 mb-0">Pay Period</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-6">
+                                            <label class="form-label fw-semibold" for="o_new_payroll_month">Month</label>
+                                            <select id="o_new_payroll_month" class="form-select"
+                                                    t-model.number="state.month" t-on-change="onMonthYearChange">
+                                                <option t-foreach="months" t-as="month" t-key="month[0]" t-att-value="month[0]">
+                                                    <t t-esc="month[1]"/>
+                                                </option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label fw-semibold" for="o_new_payroll_year">Year</label>
+                                            <select id="o_new_payroll_year" class="form-select"
+                                                    t-model.number="state.year" t-on-change="onMonthYearChange">
+                                                <option t-foreach="years" t-as="year" t-key="year" t-att-value="year">
+                                                    <t t-esc="year"/>
+                                                </option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="row g-3">
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label fw-semibold" for="o_new_payroll_start">
+                                                Start Date <span class="text-danger">*</span>
+                                            </label>
+                                            <input id="o_new_payroll_start" type="date" class="form-control"
+                                                   required="required" t-model="state.form.date_start"
+                                                   t-on-change="onPeriodChange"/>
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label fw-semibold" for="o_new_payroll_end">
+                                                End Date <span class="text-danger">*</span>
+                                            </label>
+                                            <input id="o_new_payroll_end" type="date" class="form-control"
+                                                   required="required" t-model="state.form.date_end"
+                                                   t-on-change="onPeriodChange"/>
+                                        </div>
+                                    </div>
+                                    <div class="row g-3 mt-1">
+                                        <div class="col-6">
+                                            <div class="o_payroll_period_stat">
+                                                <span class="text-muted">Total Employees</span>
+                                                <strong t-esc="state.data.employee_count"/>
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="o_payroll_period_stat">
+                                                <span class="text-muted">Working Days</span>
+                                                <strong t-esc="state.data.working_days"/>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card border-0 shadow-sm o_payroll_employees_card">
+                        <div class="card-header bg-white py-3">
+                            <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                                <div>
+                                    <h2 class="h5 mb-1">Employees</h2>
+                                    <p class="text-muted mb-0">
+                                        <t t-esc="selectedCount"/> of <t t-esc="state.data.employee_count"/> selected
+                                    </p>
+                                </div>
+                                <div class="d-flex flex-column flex-sm-row flex-wrap gap-2">
+                                    <div class="input-group o_payroll_employee_search">
+                                        <span class="input-group-text"><i class="fa fa-search" aria-hidden="true"/></span>
+                                        <input type="search" class="form-control" placeholder="Search employee…"
+                                               aria-label="Search employee" t-model="state.search"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div t-if="state.loading" class="text-center py-5">
+                            <i class="fa fa-spinner fa-spin fa-2x text-primary mb-3" role="img" aria-label="Loading"/>
+                            <p class="text-muted mb-0">Loading employees…</p>
+                        </div>
+                        <div t-elif="state.error" class="p-3">
+                            <div class="alert alert-danger d-flex align-items-center justify-content-between mb-0" role="alert">
+                                <span t-esc="state.error"/>
+                                <button type="button" class="btn btn-outline-danger btn-sm" t-on-click="() => this.loadData()">Retry</button>
+                            </div>
+                        </div>
+                        <t t-else="">
+                            <div t-if="filteredEmployees.length" class="table-responsive">
+                                <table class="table table-hover align-middle mb-0 o_payroll_run_table">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th class="o_payroll_checkbox_cell">
+                                                <input class="form-check-input" type="checkbox"
+                                                       aria-label="Select all employees"
+                                                       t-att-checked="areAllEmployeesSelected()"
+                                                       t-on-change="toggleAllEmployees"/>
+                                            </th>
+                                            <th>Employee</th>
+                                            <th>Department</th>
+                                            <th>Designation</th>
+                                            <th class="text-end text-nowrap">Basic Salary (BDT)</th>
+                                            <th class="text-end text-nowrap">Allowances (BDT)</th>
+                                            <th class="text-end text-nowrap">Overtime (BDT)</th>
+                                            <th class="text-end text-nowrap">Bonuses (BDT)</th>
+                                            <th class="text-end text-nowrap">Deductions (BDT)</th>
+                                            <th class="text-end text-nowrap">Net Pay (BDT)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr t-foreach="filteredEmployees" t-as="row" t-key="row.employee_id"
+                                            t-att-class="isEmployeeSelected(row.employee_id) ? 'o_payroll_selected_row' : ''">
+                                            <td class="o_payroll_checkbox_cell">
+                                                <input class="form-check-input" type="checkbox"
+                                                       t-att-aria-label="'Select ' + row.name"
+                                                       t-att-checked="isEmployeeSelected(row.employee_id)"
+                                                       t-att-disabled="!row.eligible"
+                                                       t-att-title="row.eligible ? '' : 'No eligible contract and salary structure for this period'"
+                                                       t-on-change="(event) => this.toggleEmployee(row.employee_id, event)"/>
+                                            </td>
+                                            <td>
+                                                <div class="o_payroll_employee d-flex align-items-center gap-2">
+                                                    <img class="o_payroll_employee_avatar rounded-circle flex-shrink-0"
+                                                         t-att-src="row.avatar_url"
+                                                         t-att-alt="row.name"
+                                                         t-on-error="onAvatarError"/>
+                                                    <div class="min-w-0">
+                                                        <div class="fw-bold text-truncate" t-esc="row.name"/>
+                                                        <div class="text-muted small text-truncate">
+                                                            <t t-esc="row.identification_id"/>
+                                                            <span t-if="!row.eligible" class="badge text-bg-warning ms-1">No contract</span>
+                                                            <span t-if="row.has_existing_payslip" class="badge text-bg-info ms-1">Existing payslip</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td><span class="badge rounded-pill o_payroll_department_badge" t-esc="row.department"/></td>
+                                            <td class="text-nowrap" t-esc="row.designation"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.basic_salary)"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.allowance)"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.overtime)"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.bonus)"/>
+                                            <td class="text-end text-nowrap fw-semibold text-danger" t-esc="formatAmount(row.deduction)"/>
+                                            <td class="text-end text-nowrap fw-bold text-success" t-esc="formatAmount(row.net_pay)"/>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div t-else="" class="text-center py-5 px-3">
+                                <i class="fa fa-users fa-3x text-muted mb-3" aria-hidden="true"/>
+                                <h3 class="h6">No employees found</h3>
+                                <p class="text-muted mb-0">Adjust the search or payroll period.</p>
+                            </div>
+                        </t>
+                    </div>
+                </t>
+            </div>
+        </div>
+    </t>
+
+    <t t-name="kio_payroll_overview_extension.PayrollBatchDetails">
+        <div class="o_kio_payroll_overview o_kio_payroll_batch_details h-100 overflow-auto">
+            <div class="container-fluid py-4">
+                <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+                    <div class="d-flex flex-wrap align-items-center gap-3">
+                        <button type="button" class="btn btn-outline-secondary text-nowrap" t-on-click="backToOverview">
+                            <i class="fa fa-arrow-left me-1" aria-hidden="true"/> Back
+                        </button>
+                        <div t-if="state.data">
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <h1 class="h3 mb-0" t-esc="state.data.batch.name"/>
+                                <span t-attf-class="badge rounded-pill #{batchStatusClass(state.data.batch.state)}" t-esc="state.data.batch.state_label"/>
+                            </div>
+                            <p class="text-muted mb-0 mt-1">
+                                <t t-esc="state.data.company.name"/> · Payroll Batch Details
+                            </p>
+                        </div>
+                        <div t-else="">
+                            <h1 class="h3 mb-1">Payroll Batch Details</h1>
+                            <p class="text-muted mb-0">View batch summary and employee salary details.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div t-if="state.loading &amp;&amp; !state.data" class="o_payroll_loading d-flex flex-column align-items-center justify-content-center py-5">
+                    <i class="fa fa-spinner fa-spin fa-2x text-primary mb-3" role="img" aria-label="Loading"/>
+                    <span class="text-muted">Loading payroll batch details…</span>
+                </div>
+                <div t-elif="state.error &amp;&amp; !state.data" class="alert alert-danger d-flex align-items-center justify-content-between" role="alert">
+                    <span t-esc="state.error"/>
+                    <button type="button" class="btn btn-outline-danger btn-sm" t-on-click="() => this.loadData()">Retry</button>
+                </div>
+
+                <t t-elif="state.data">
+                    <!-- Four Summary Cards -->
+                    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_employees">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-users" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Employees</span>
+                                    <strong t-esc="state.data.summary.total_employees"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_salary">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-money" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Net Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.summary.total_net_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_paid">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-check-circle" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Paid Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.summary.total_paid_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col">
+                            <div class="o_payroll_kpi card h-100 border-0 shadow-sm o_kpi_unpaid">
+                                <div class="card-body">
+                                    <div class="o_payroll_kpi_icon"><i class="fa fa-exclamation-circle" aria-hidden="true"/></div>
+                                    <span class="o_payroll_kpi_label text-muted">Total Unpaid Salary</span>
+                                    <strong t-esc="formatCurrency(state.data.summary.total_unpaid_salary)"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Saved Payroll Information and Pay Period (Readonly) -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-12 col-xl-6">
+                            <div class="card border-0 shadow-sm o_payroll_form_card h-100">
+                                <div class="card-header bg-white py-3">
+                                    <h2 class="h5 mb-0">Payroll Information</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted small fw-semibold">Payroll Name</label>
+                                        <div class="form-control bg-light" t-esc="state.data.batch.name"/>
+                                    </div>
+                                    <div class="row g-3">
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label text-muted small fw-semibold">Type</label>
+                                            <div class="form-control bg-light" t-esc="state.data.batch.payroll_type_label"/>
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label text-muted small fw-semibold">Payment Date</label>
+                                            <div class="form-control bg-light" t-esc="formatDate(state.data.batch.payment_date)"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-xl-6">
+                            <div class="card border-0 shadow-sm o_payroll_form_card h-100">
+                                <div class="card-header bg-white py-3">
+                                    <h2 class="h5 mb-0">Pay Period</h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label text-muted small fw-semibold">Start Date</label>
+                                            <div class="form-control bg-light" t-esc="formatDate(state.data.period.date_start)"/>
+                                        </div>
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label text-muted small fw-semibold">End Date</label>
+                                            <div class="form-control bg-light" t-esc="formatDate(state.data.period.date_end)"/>
+                                        </div>
+                                    </div>
+                                    <div class="row g-3">
+                                        <div class="col-6">
+                                            <div class="o_payroll_period_stat">
+                                                <span class="text-muted">Total Employees</span>
+                                                <strong t-esc="state.data.summary.total_employees"/>
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="o_payroll_period_stat">
+                                                <span class="text-muted">Working Days</span>
+                                                <strong t-esc="state.data.period.working_days"/>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Employees Salary Breakdown Table -->
+                    <div class="card border-0 shadow-sm o_payroll_employees_card">
+                        <div class="card-header bg-white py-3">
+                            <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                                <div>
+                                    <h2 class="h5 mb-1">Employees</h2>
+                                    <p class="text-muted mb-0">
+                                        <t t-esc="filteredEmployees.length"/> of <t t-esc="state.data.summary.total_employees"/> employees
+                                    </p>
+                                </div>
+                                <div class="d-flex flex-column flex-sm-row flex-wrap gap-2">
+                                    <div class="input-group o_payroll_employee_search">
+                                        <span class="input-group-text"><i class="fa fa-search" aria-hidden="true"/></span>
+                                        <input type="search" class="form-control" placeholder="Search employee…"
+                                               aria-label="Search employee" t-model="state.search"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div t-if="filteredEmployees.length" class="table-responsive">
+                                <table class="table table-hover align-middle mb-0 o_payroll_run_table">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Employee</th>
+                                            <th>Department</th>
+                                            <th>Designation</th>
+                                            <th class="text-end text-nowrap">Basic Salary (BDT)</th>
+                                            <th class="text-end text-nowrap">Allowances (BDT)</th>
+                                            <th class="text-end text-nowrap">Overtime (BDT)</th>
+                                            <th class="text-end text-nowrap">Bonuses (BDT)</th>
+                                            <th class="text-end text-nowrap">Deductions (BDT)</th>
+                                            <th class="text-end text-nowrap">Net Pay (BDT)</th>
+                                            <th class="text-center text-nowrap">Payment Status</th>
+                                            <th class="text-center text-nowrap">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr t-foreach="filteredEmployees" t-as="row" t-key="row.slip_id">
+                                            <td>
+                                                <div class="o_payroll_employee d-flex align-items-center gap-2">
+                                                    <img class="o_payroll_employee_avatar rounded-circle flex-shrink-0"
+                                                         t-att-src="row.avatar_url"
+                                                         t-att-alt="row.name"
+                                                         t-on-error="onAvatarError"/>
+                                                    <div class="min-w-0">
+                                                        <div class="fw-bold text-truncate" t-esc="row.name"/>
+                                                        <div class="text-muted small text-truncate" t-esc="row.identification_id"/>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td><span class="badge rounded-pill o_payroll_department_badge" t-esc="row.department"/></td>
+                                            <td class="text-nowrap" t-esc="row.designation"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.basic_salary)"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.allowance)"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.overtime)"/>
+                                            <td class="text-end text-nowrap fw-semibold" t-esc="formatAmount(row.bonus)"/>
+                                            <td class="text-end text-nowrap fw-semibold text-danger" t-esc="formatAmount(row.deduction)"/>
+                                            <td class="text-end text-nowrap fw-bold text-success" t-esc="formatAmount(row.net_pay)"/>
+                                            <td class="text-center text-nowrap">
+                                                <span t-attf-class="badge rounded-pill #{row.paid ? 'text-bg-success' : (row.payment_state === 'partial' ? 'text-bg-warning' : 'text-bg-secondary')}"
+                                                      t-esc="row.payment_state_label"/>
+                                            </td>
+                                            <td class="text-center text-nowrap">
+                                                <t t-if="row.paid">
+                                                    <button type="button" class="btn btn-primary btn-sm text-nowrap"
+                                                            t-att-aria-label="'Download payslip for ' + row.name"
+                                                            t-on-click="() => this.onDownloadPayslip(row)">
+                                                        <i class="fa fa-download me-1" aria-hidden="true"/> Download Payslip
+                                                    </button>
+                                                </t>
+                                                <t t-else="">
+                                                    <button type="button" class="btn btn-success btn-sm text-nowrap"
+                                                            t-on-click="() => this.onPayNow(row)">
+                                                        Pay Now
+                                                    </button>
+                                                </t>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot class="table-light fw-bold">
+                                        <tr>
+                                            <td>Total</td>
+                                            <td/>
+                                            <td/>
+                                            <td class="text-end text-nowrap" t-esc="formatAmount(state.data.totals.basic_salary)"/>
+                                            <td class="text-end text-nowrap" t-esc="formatAmount(state.data.totals.allowance)"/>
+                                            <td class="text-end text-nowrap" t-esc="formatAmount(state.data.totals.overtime)"/>
+                                            <td class="text-end text-nowrap" t-esc="formatAmount(state.data.totals.bonus)"/>
+                                            <td class="text-end text-nowrap text-danger" t-esc="formatAmount(state.data.totals.deduction)"/>
+                                            <td class="text-end text-nowrap text-success" t-esc="formatAmount(state.data.totals.net_pay)"/>
+                                            <td/>
+                                            <td/>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                            <div t-else="" class="text-center py-5 px-3">
+                                <i class="fa fa-users fa-3x text-muted mb-3" aria-hidden="true"/>
+                                <h3 class="h6">No employees found</h3>
+                                <p class="text-muted mb-0">No payslips match the search criteria.</p>
+                            </div>
+                        </div>
+                    </div>
+                </t>
+            </div>
+        </div>
+    </t>
+</templates>
