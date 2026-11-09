@@ -437,6 +437,23 @@ export class NewPayrollGeneration extends Component {
             },
         });
         onWillStart(() => this.loadData());
+        onWillUpdateProps(async (nextProps) => {
+            const nextContext = nextProps.action?.context || {};
+            const nextMonth = Number(nextContext.kio_payroll_month);
+            const nextYear = Number(nextContext.kio_payroll_year);
+            const monthChanged = Boolean(nextMonth) && nextMonth !== this.state.month;
+            const yearChanged = Boolean(nextYear) && nextYear !== this.state.year;
+            if (!monthChanged && !yearChanged) {
+                return;
+            }
+            if (monthChanged) {
+                this.state.month = nextMonth;
+            }
+            if (yearChanged) {
+                this.state.year = nextYear;
+            }
+            await this.onMonthYearChange();
+        });
     }
 
     pad(value) {
@@ -473,9 +490,26 @@ export class NewPayrollGeneration extends Component {
         return this.state.selectedEmployeeIds.length;
     }
 
+    get canGenerate() {
+        const form = this.state.form;
+        return Boolean(
+            !this.state.loading
+            && !this.state.generating
+            && this.state.data
+            && this.selectedCount > 0
+            && form.name
+            && form.name.trim()
+            && form.date_start
+            && form.date_end
+            && form.payment_date
+            && form.date_end >= form.date_start
+        );
+    }
+
     async loadData(selectEligible = true) {
         const { date_start: dateStart, date_end: dateEnd } = this.state.form;
         if (!dateStart || !dateEnd || dateEnd < dateStart) {
+            this.state.loading = false;
             return;
         }
         this.state.loading = true;
@@ -486,14 +520,19 @@ export class NewPayrollGeneration extends Component {
                 "get_new_payroll_run_data",
                 [dateStart, dateEnd]
             );
+            const employees = Array.isArray(data.employees) ? data.employees : [];
             this.state.data = data;
-            this.state.employees = data.employees;
-            const eligibleIds = data.employees
-                .filter((row) => row.eligible)
-                .map((row) => row.employee_id);
+            this.state.employees = employees;
+            const eligibleIds = [
+                ...new Set(
+                    employees
+                        .filter((row) => row.eligible)
+                        .map((row) => row.employee_id)
+                ),
+            ];
             this.state.selectedEmployeeIds = selectEligible
                 ? eligibleIds
-                : this.state.selectedEmployeeIds.filter(
+                : [...new Set(this.state.selectedEmployeeIds)].filter(
                     (employeeId) => eligibleIds.includes(employeeId)
                 );
         } catch (error) {
@@ -562,6 +601,9 @@ export class NewPayrollGeneration extends Component {
     }
 
     formatAmount(value) {
+        if (value === null || value === undefined || value === "") {
+            return "—";
+        }
         return new Intl.NumberFormat("en-BD", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,

@@ -229,6 +229,35 @@ class KioPayrollPayslip(models.Model):
         return {cfg.employee_id.id: cfg for cfg in configs}
 
     @api.model
+    def _get_employee_contracts(self, employees, company, date_start, date_end):
+        """Return the most relevant contract per employee for the period.
+
+        A contract is applicable when it overlaps the payroll period:
+        date_start <= payroll end and (date_end is empty or date_end >=
+        payroll start). Draft and cancelled contracts are ignored, while
+        all active/running/closed contracts are kept because they may still
+        cover part of the selected period.
+        """
+        if not employees or "hr.contract" not in self.env.registry.models:
+            return {}
+        contracts = self.env["hr.contract"].search([
+            ("employee_id", "in", employees.ids),
+            ("company_id", "=", company.id),
+            ("active", "=", True),
+            ("date_start", "<=", date_end),
+            "|",
+            ("date_end", "=", False),
+            ("date_end", ">=", date_start),
+            ("state", "not in", ("draft", "cancel", "cancelled")),
+        ], order="employee_id, date_start desc, id desc")
+        contract_by_employee = {}
+        for contract in contracts:
+            employee_id = contract.employee_id.id
+            if employee_id not in contract_by_employee:
+                contract_by_employee[employee_id] = contract
+        return contract_by_employee
+
+    @api.model
     def _get_payroll_bonus_amounts(self, company, date_start, date_end, employee_ids=None):
         if "kio.bonus.line" not in self.env.registry.models:
             return {}
@@ -254,6 +283,9 @@ class KioPayrollPayslip(models.Model):
             ("active", "=", True),
         ], order="name, id")
         configs = self._get_employee_salary_config(employees, company)
+        contracts = self._get_employee_contracts(
+            employees, company, date_start, date_end
+        )
         pending_bonuses = self._get_payroll_bonus_amounts(
             company, date_start, date_end, employee_ids=employees.ids
         )
@@ -268,19 +300,69 @@ class KioPayrollPayslip(models.Model):
 
         rows = []
         working_days_values = []
+        seen_employee_ids = set()
+        missing_contract_count = 0
+        missing_wage_count = 0
         for employee in employees:
-            cfg = configs.get(employee.id)
-            if not cfg or (cfg.basic_salary or 0.0) <= 0:
+            if employee.id in seen_employee_ids:
                 continue
-            basic = cfg.basic_salary or 0.0
-            allowance = cfg.allowance or 0.0
-            overtime = 0.0
-            commission = 0.0
-            bonus = pending_bonuses.get(employee.id, 0.0)
-            deduction = 0.0
-            net_pay = basic + allowance + overtime + commission + bonus - deduction
-            working_days = cfg.working_days or 0.0
-            working_days_values.append(working_days)
+            seen_employee_ids.add(employee.id)
+
+            cfg = configs.get(employee.id)
+            contract = contracts.get(employee.id)
+            contract_wage = contract.wage if contract else None
+            has_wage = contract is not None and (contract_wage or 0.0) > 0
+            eligible = has_wage
+
+            eligibility_reason = False
+            contract_status = contract.state if contract else False
+            contract_status_label = False
+            if contract:
+                contract_status_label = dict(
+                    contract._fields["state"].selection
+                ).get(contract.state, contract.state)
+            if not contract:
+                missing_contract_count += 1
+                eligibility_reason = _(
+                    "No active contract overlaps this payroll period."
+                )
+            elif not has_wage:
+                missing_wage_count += 1
+                eligibility_reason = _(
+                    "The applicable contract has no valid wage."
+                )
+
+            working_days = (cfg.working_days or 0.0) if cfg else 0.0
+            if eligible:
+                basic = contract_wage or 0.0
+                allowance = (cfg.allowance or 0.0) if cfg else 0.0
+                overtime = 0.0
+                commission = 0.0
+                bonus = pending_bonuses.get(employee.id, 0.0)
+                deduction = 0.0
+                net_pay = basic + allowance + overtime + commission + bonus - deduction
+                working_days_values.append(working_days)
+                amounts = {
+                    "basic_salary": currency.round(basic),
+                    "allowance": currency.round(allowance),
+                    "overtime": currency.round(overtime),
+                    "commission": currency.round(commission),
+                    "bonus": currency.round(bonus),
+                    "deduction": currency.round(deduction),
+                    "net_pay": currency.round(net_pay),
+                }
+            else:
+                # Never invent a salary for a missing/invalid contract.
+                amounts = {
+                    "basic_salary": None,
+                    "allowance": None,
+                    "overtime": None,
+                    "commission": None,
+                    "bonus": None,
+                    "deduction": None,
+                    "net_pay": None,
+                }
+
             rows.append({
                 "employee_id": employee.id,
                 "name": employee.display_name,
@@ -288,18 +370,19 @@ class KioPayrollPayslip(models.Model):
                 "avatar_url": f"/web/image/hr.employee/{employee.id}/avatar_128",
                 "department": employee.department_id.display_name or "-",
                 "designation": employee.job_id.display_name or "-",
-                "basic_salary": currency.round(basic),
-                "allowance": currency.round(allowance),
-                "overtime": currency.round(overtime),
-                "commission": currency.round(commission),
-                "bonus": currency.round(bonus),
-                "deduction": currency.round(deduction),
-                "net_pay": currency.round(net_pay),
+                **amounts,
                 "working_days": round(working_days, 2),
-                "eligible": True,
+                "eligible": eligible,
+                "eligibility_reason": eligibility_reason,
+                "has_contract": bool(contract),
+                "contract_id": contract.id if contract else False,
+                "contract_name": contract.name if contract else False,
+                "contract_status": contract_status,
+                "contract_status_label": contract_status_label,
                 "has_existing_payslip": employee.id in existing_by_employee,
             })
 
+        eligible_employee_count = sum(1 for row in rows if row["eligible"])
         average_working_days = (
             sum(working_days_values) / len(working_days_values)
             if working_days_values else 0.0
@@ -317,8 +400,11 @@ class KioPayrollPayslip(models.Model):
             "date_end": date_end,
             "default_name": "%s Payroll" % date_end.strftime("%B %Y"),
             "payment_date": date_end,
-            "employee_count": len(rows),
-            "eligible_employee_count": len(rows),
+            "employee_count": eligible_employee_count,
+            "eligible_employee_count": eligible_employee_count,
+            "total_employee_count": len(rows),
+            "missing_contract_count": missing_contract_count,
+            "missing_wage_count": missing_wage_count,
             "working_days": round(average_working_days, 2),
             "employees": rows,
             "loan_count": 0,
@@ -328,9 +414,12 @@ class KioPayrollPayslip(models.Model):
         }
 
     @api.model
-    def _prepare_payslip_lines(self, employee, cfg, bonus_amount=0.0):
-        basic = cfg.basic_salary or 0.0
-        allowance = cfg.allowance or 0.0
+    def _prepare_payslip_lines(self, employee, cfg=None, bonus_amount=0.0,
+                               basic=None, allowance=None):
+        if basic is None:
+            basic = (cfg.basic_salary or 0.0) if cfg else 0.0
+        if allowance is None:
+            allowance = (cfg.allowance or 0.0) if cfg else 0.0
         overtime = 0.0
         bonus = bonus_amount or 0.0
         deduction = 0.0
@@ -375,14 +464,19 @@ class KioPayrollPayslip(models.Model):
         company = self.env.company
         employees = self.env["hr.employee"].browse(employee_ids).exists()
         configs = self._get_employee_salary_config(employees, company)
+        contracts = self._get_employee_contracts(
+            employees, company, date_start, date_end
+        )
         ineligible = [
             emp.display_name
             for emp in employees
-            if emp.company_id != company or emp.id not in configs or configs[emp.id].basic_salary <= 0
+            if emp.company_id != company
+            or emp.id not in contracts
+            or (contracts[emp.id].wage or 0.0) <= 0
         ]
         if ineligible:
             raise ValidationError(_(
-                "The following employees do not have an eligible salary configuration: %s."
+                "The following employees do not have a valid contract wage for this period: %s."
             ) % ", ".join(ineligible))
 
         self.env.cr.execute("SELECT pg_advisory_xact_lock(%s, %s)", (0x4B494F, company.id))
@@ -412,7 +506,8 @@ class KioPayrollPayslip(models.Model):
         )
         payslip_vals = []
         for employee in employees:
-            cfg = configs[employee.id]
+            cfg = configs.get(employee.id)
+            contract = contracts[employee.id]
             payslip_vals.append({
                 "name": _("Payslip - %s") % employee.display_name,
                 "batch_id": batch.id,
@@ -422,7 +517,11 @@ class KioPayrollPayslip(models.Model):
                 "date_to": date_end,
                 "state": "draft",
                 "line_ids": self._prepare_payslip_lines(
-                    employee, cfg, bonus_amount=bonus_amounts.get(employee.id, 0.0)
+                    employee,
+                    cfg,
+                    bonus_amount=bonus_amounts.get(employee.id, 0.0),
+                    basic=contract.wage or 0.0,
+                    allowance=(cfg.allowance or 0.0) if cfg else 0.0,
                 ),
             })
         slips = self.create(payslip_vals)
