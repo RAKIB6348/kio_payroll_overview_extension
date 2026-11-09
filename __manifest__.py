@@ -20,6 +20,7 @@
         "views/kio_payroll_adjustment_views.xml",
         "views/kio_payroll_views.xml",
         "views/kio_overtime_configuration_views.xml",
+        "views/hr_contract_allowance_views.xml",
         "views/res_config_settings_views.xml",
     ],
     "assets": {

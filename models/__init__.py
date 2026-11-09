@@ -5,6 +5,7 @@ from . import kio_overtime
 from . import kio_overtime_configuration
 from . import kio_late_deduction
 from . import hr_attendance
+from . import hr_contract
 from . import kio_bonus_type
 from . import kio_bonus
 from . import res_company
