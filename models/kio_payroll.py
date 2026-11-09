@@ -1216,6 +1216,39 @@ class KioPayrollPayslip(models.Model):
             ("batch_id", "=", batch.id),
             ("company_id", "=", company.id),
         ], order="employee_id, id")
+        employees = slips.mapped("employee_id")
+        contracts_by_employee = {}
+        if employees and batch.date_start and batch.date_end and "hr.contract" in self.env.registry.models:
+            contracts, _ambiguous = self._get_employee_contracts(
+                employees, company, batch.date_start, batch.date_end
+            )
+            contracts_by_employee = dict(contracts)
+            # For existing/generated batches, fill gaps (e.g. ambiguous historical overlaps)
+            # using the latest overlapping running contract for working-days display only.
+            missing_ids = [eid for eid in employees.ids if eid not in contracts_by_employee]
+            if missing_ids:
+                fallback_contracts = self.env["hr.contract"].sudo().search([
+                    ("employee_id", "in", missing_ids),
+                    ("company_id", "=", company.id),
+                    ("state", "=", "open"),
+                    ("date_start", "<=", batch.date_end),
+                    "|",
+                    ("date_end", "=", False),
+                    ("date_end", ">=", batch.date_start),
+                ], order="employee_id, date_start desc, id desc")
+                for contract in fallback_contracts:
+                    contracts_by_employee.setdefault(contract.employee_id.id, contract)
+
+        company_calendar = company.resource_calendar_id
+        batch_working_days = self._count_scheduled_working_days(
+            company_calendar, batch.date_start, batch.date_end
+        )
+        batch_working_days_available = batch_working_days is not None
+        batch_working_days_message = (
+            False if batch_working_days_available
+            else _("No default Working Schedule is configured for this company.")
+        )
+
         rows = []
         total_net = 0.0
         total_paid = 0.0
@@ -1236,6 +1269,18 @@ class KioPayrollPayslip(models.Model):
             total_paid += paid_amount
             total_unpaid += unpaid_amount
             emp = slip.employee_id
+            contract = contracts_by_employee.get(emp.id)
+            calendar = (
+                (contract.resource_calendar_id if contract else False)
+                or emp.resource_calendar_id
+                or company_calendar
+            )
+            employee_working_days = self._count_scheduled_working_days(
+                calendar,
+                slip.date_from or batch.date_start,
+                slip.date_to or batch.date_end,
+                resource=emp.resource_id,
+            )
             rows.append({
                 "slip_id": slip.id,
                 "employee_id": emp.id,
@@ -1254,6 +1299,9 @@ class KioPayrollPayslip(models.Model):
                 "paid_amount": paid_amount,
                 "unpaid_amount": unpaid_amount,
                 "payslip_number": slip.number or slip.name or "-",
+                "working_days": employee_working_days,
+                "working_days_available": employee_working_days is not None,
+                "working_calendar_name": calendar.display_name if calendar else False,
                 "payment_state": info["payment_state"],
                 "payment_state_label": state_labels[info["payment_state"]],
                 "paid": is_paid,
@@ -1271,7 +1319,7 @@ class KioPayrollPayslip(models.Model):
             "total_unpaid_salary": currency.round(total_unpaid),
         }
         date_start = batch.date_start
-        employees = [
+        employees_data = [
             dict(
                 r,
                 name=r.get("employee_name"),
@@ -1294,17 +1342,27 @@ class KioPayrollPayslip(models.Model):
             "state": batch.state,
             "state_label": dict(batch._fields["state"].selection).get(batch.state, batch.state),
             "total_employees": len(slips.mapped("employee_id")),
-            "working_days": 0.0,
+            "working_days": batch_working_days,
+            "working_days_available": batch_working_days_available,
+            "working_days_message": batch_working_days_message,
+            "working_calendar_name": company_calendar.display_name if company_calendar else False,
         }
         return {
             "company": {"id": company.id, "name": company.display_name},
             "currency": {"id": currency.id, "name": currency.name, "symbol": currency.symbol, "position": currency.position, "decimal_places": currency.decimal_places},
             "batch": batch_data,
-            "period": {"date_start": batch.date_start, "date_end": batch.date_end},
+            "period": {
+                "date_start": batch.date_start,
+                "date_end": batch.date_end,
+                "working_days": batch_working_days,
+                "working_days_available": batch_working_days_available,
+                "working_days_message": batch_working_days_message,
+                "working_calendar_name": company_calendar.display_name if company_calendar else False,
+            },
             "totals": totals,
             "summary": totals,
             "rows": rows,
-            "employees": employees,
+            "employees": employees_data,
         }
 
     # Stub compatibility methods used by older code paths (not required for clean install)

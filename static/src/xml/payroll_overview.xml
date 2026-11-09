@@ -769,7 +769,11 @@
                                         <div class="col-6">
                                             <div class="o_payroll_period_stat">
                                                 <span class="text-muted">Working Days</span>
-                                                <strong t-esc="state.data.period.working_days"/>
+                                                <strong t-if="state.data.period.working_days_available || (state.data.period.working_days !== false and state.data.period.working_days !== null and state.data.period.working_days !== undefined)"
+                                                        t-esc="state.data.period.working_days"
+                                                        t-att-title="state.data.period.working_calendar_name ? 'Schedule: ' + state.data.period.working_calendar_name : ''"/>
+                                                <strong t-else="" class="text-muted"
+                                                        t-att-title="state.data.period.working_days_message || ''">Unavailable</strong>
                                             </div>
                                         </div>
                                     </div>
