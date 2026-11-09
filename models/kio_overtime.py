@@ -314,18 +314,43 @@ class KioOvertime(models.Model):
         hourly_rate = 0.0
         overtime_rate = 0.0
         if overtime_hours > 0 and not review_reasons:
-            enabled, per_hour_rate = self._get_overtime_policy(company)
+            enabled, company_per_hour_rate = self._get_overtime_policy(company)
+            config = self.env["kio.overtime.configuration"].get_employee_overtime_rate_info(employee, company)
             if not enabled:
-                # Monetary calculation disabled: keep hours, no amount.
                 overtime_amount = 0.0
-            elif per_hour_rate <= 0:
-                review_reasons.append(
-                    _("Per Hour Rate is not configured. Set Payroll > Configuration > Settings > Attendance Overtime Policy > Per Hour Rate (BDT) before enabling monetary overtime calculation.")
-                )
+            elif config:
+                calc_type = config.get("calculation_type") or "fixed"
+                if calc_type == "percentage":
+                    percentage = float(config.get("overtime_percentage") or 0.0)
+                    wage, wage_issue = self._get_applicable_wage(employee, day_date, company)
+                    monthly_hours = self._get_monthly_scheduled_hours(calendar, day_date, tz)
+                    if wage_issue:
+                        review_reasons.append(wage_issue)
+                    elif percentage <= 0:
+                        review_reasons.append(_("Overtime Rate (%) is not configured for this employee."))
+                    elif monthly_hours <= 0:
+                        review_reasons.append(_("Monthly scheduled working hours are unavailable for percentage overtime calculation."))
+                    elif wage <= 0:
+                        review_reasons.append(_("Applicable contract wage is unavailable for percentage overtime calculation."))
+                    else:
+                        hourly_rate = wage / monthly_hours
+                        overtime_rate = percentage
+                        overtime_amount = company.currency_id.round(
+                            overtime_hours * hourly_rate * (percentage / 100.0)
+                        )
+                else:
+                    rate = float(config.get("per_hour_rate") or 0.0)
+                    if rate <= 0:
+                        review_reasons.append(_("Employee Per Hour Rate is not configured in Overtime Configuration."))
+                    else:
+                        hourly_rate = rate
+                        overtime_amount = company.currency_id.round(overtime_hours * rate)
+            elif company_per_hour_rate > 0:
+                hourly_rate = company_per_hour_rate
+                overtime_amount = company.currency_id.round(overtime_hours * company_per_hour_rate)
             else:
-                hourly_rate = per_hour_rate
-                overtime_amount = company.currency_id.round(
-                    overtime_hours * per_hour_rate
+                review_reasons.append(
+                    _("Per Hour Rate is not configured. Set an employee-specific rate in Overtime Configuration or Payroll > Configuration > Settings > Attendance Overtime Policy > Per Hour Rate (BDT).")
                 )
 
         vals = {
@@ -518,13 +543,32 @@ class KioOvertime(models.Model):
 
         overtime_amount = 0.0
         hourly_rate = 0.0
+        overtime_rate = 0.0
         if overtime_hours > 0:
-            enabled, per_hour_rate = self._get_overtime_policy(company)
-            if enabled and per_hour_rate > 0:
-                hourly_rate = per_hour_rate
-                overtime_amount = company.currency_id.round(overtime_hours * per_hour_rate)
-            # if disabled or rate missing, keep hours and amount 0 (cron skips monetary when not enabled;
-            # missing rate: keep 0 amount, consistent with policy - do not create incorrect amount)
+            enabled, company_per_hour_rate = self._get_overtime_policy(company)
+            config = self.env["kio.overtime.configuration"].get_employee_overtime_rate_info(employee, company)
+            if enabled and config:
+                calc_type = config.get("calculation_type") or "fixed"
+                if calc_type == "percentage":
+                    percentage = float(config.get("overtime_percentage") or 0.0)
+                    wage, _wage_issue = self._get_applicable_wage(employee, workday_date, company)
+                    calendar = self._get_employee_calendar(employee, workday_date)
+                    monthly_hours = self._get_monthly_scheduled_hours(calendar, workday_date, tz)
+                    if percentage > 0 and wage > 0 and monthly_hours > 0:
+                        hourly_rate = wage / monthly_hours
+                        overtime_rate = percentage
+                        overtime_amount = company.currency_id.round(
+                            overtime_hours * hourly_rate * (percentage / 100.0)
+                        )
+                else:
+                    rate = float(config.get("per_hour_rate") or 0.0)
+                    if rate > 0:
+                        hourly_rate = rate
+                        overtime_amount = company.currency_id.round(overtime_hours * rate)
+            elif enabled and not config and company_per_hour_rate > 0:
+                hourly_rate = company_per_hour_rate
+                overtime_amount = company.currency_id.round(overtime_hours * company_per_hour_rate)
+            # if disabled or rate/wage/hours missing, keep hours and amount 0; do not calculate incorrect amount
 
         return {
             "name": self._attendance_reference(employee, workday_date),
@@ -536,7 +580,7 @@ class KioOvertime(models.Model):
             "worked_hours": round(max(worked_hours, 0.0), 2),
             "overtime_hours": round(max(overtime_hours, 0.0), 2),
             "hourly_rate": hourly_rate,
-            "overtime_rate": 0.0,
+            "overtime_rate": overtime_rate,
             "overtime_amount": overtime_amount,
             "amount": overtime_amount,
             "needs_review": False,

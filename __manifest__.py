@@ -1,6 +1,6 @@
 {
     "name": "KIO Payroll Overview Extension",
-    "version": "17.0.3.0.0",
+    "version": "17.0.4.0.0",
     "category": "Human Resources/Payroll",
     "summary": "Independent payroll dashboard and payroll processing",
     "author": "KIO",
@@ -18,6 +18,7 @@
         "views/kio_bonus_type_views.xml",
         "views/kio_payroll_adjustment_views.xml",
         "views/kio_payroll_views.xml",
+        "views/kio_overtime_configuration_views.xml",
         "views/res_config_settings_views.xml",
     ],
     "assets": {
