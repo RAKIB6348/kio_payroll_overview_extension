@@ -18,29 +18,11 @@ class HrContract(models.Model):
         readonly=True,
     )
 
-    # Medical Allowance: fixed amount or percentage
-    kio_medical_allowance_type = fields.Selection(
-        [("fixed", "Fixed Amount"), ("percentage", "Percentage")],
-        string="Medical Allowance Type",
-        default="fixed",
-        required=True,
-    )
-    kio_medical_allowance_fixed = fields.Monetary(
-        string="Medical Allowance (Fixed)",
-        currency_field="currency_id",
-        default=0.0,
-    )
-    kio_medical_allowance_percent = fields.Float(
-        string="Medical Allowance (%)",
-        digits=(16, 2),
-        default=0.0,
-    )
+    # Medical Allowance: fixed monetary amount
     kio_medical_allowance = fields.Monetary(
         string="Medical Allowance",
-        compute="_compute_kio_allowances",
-        store=True,
         currency_field="currency_id",
-        readonly=True,
+        default=0.0,
     )
 
     # Fixed-amount allowances
@@ -84,9 +66,7 @@ class HrContract(models.Model):
         "wage",
         "currency_id",
         "kio_house_rent_allowance_percent",
-        "kio_medical_allowance_type",
-        "kio_medical_allowance_fixed",
-        "kio_medical_allowance_percent",
+        "kio_medical_allowance",
         "kio_conveyance_allowance",
         "kio_food_allowance",
         "kio_mobile_allowance",
@@ -97,10 +77,7 @@ class HrContract(models.Model):
             wage = contract.wage or 0.0
             currency = contract.currency_id or contract.company_id.currency_id
             hra = wage * (contract.kio_house_rent_allowance_percent or 0.0) / 100.0
-            if contract.kio_medical_allowance_type == "percentage":
-                medical = wage * (contract.kio_medical_allowance_percent or 0.0) / 100.0
-            else:
-                medical = contract.kio_medical_allowance_fixed or 0.0
+            medical = contract.kio_medical_allowance or 0.0
             conveyance = contract.kio_conveyance_allowance or 0.0
             food = contract.kio_food_allowance or 0.0
             mobile = contract.kio_mobile_allowance or 0.0
@@ -117,6 +94,5 @@ class HrContract(models.Model):
                 total = currency.round(total)
                 gross = currency.round(gross)
             contract.kio_house_rent_allowance = hra
-            contract.kio_medical_allowance = medical
             contract.kio_total_allowance = total
             contract.kio_gross_salary = gross

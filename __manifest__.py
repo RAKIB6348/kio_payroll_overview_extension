@@ -1,6 +1,6 @@
 {
     "name": "KIO Payroll Overview Extension",
-    "version": "17.0.4.0.1",
+    "version": "17.0.4.0.2",
     "category": "Human Resources/Payroll",
     "summary": "Independent payroll dashboard and payroll processing",
     "author": "KIO",

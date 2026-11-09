@@ -7,24 +7,9 @@
         <field name="arch" type="xml">
             <xpath expr="//page[@name='information']//group[@name='salary']//div[@name='wage']" position="after">
                 <separator string="Allowances" colspan="2"/>
-                <label for="kio_house_rent_allowance_percent" string="House Rent Allowance (%)"/>
-                <div class="o_row">
-                    <field name="kio_house_rent_allowance_percent" class="oe_inline"/>
-                    <span class="text-muted ms-1">of Wage</span>
-                    <field name="kio_house_rent_allowance" class="oe_inline ms-2" readonly="1" widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                </div>
+                <field name="kio_house_rent_allowance_percent" string="House Rent Allowance (%)"/>
 
-                <field name="kio_medical_allowance_type" string="Medical Allowance"/>
-                <label for="kio_medical_allowance_fixed" string="Medical Amount" invisible="kio_medical_allowance_type != 'fixed'"/>
-                <div class="o_row" invisible="kio_medical_allowance_type != 'fixed'">
-                    <field name="kio_medical_allowance_fixed" class="oe_inline" widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                </div>
-                <label for="kio_medical_allowance_percent" string="Medical (%)" invisible="kio_medical_allowance_type != 'percentage'"/>
-                <div class="o_row" invisible="kio_medical_allowance_type != 'percentage'">
-                    <field name="kio_medical_allowance_percent" class="oe_inline"/>
-                    <span class="text-muted ms-1">of Wage</span>
-                    <field name="kio_medical_allowance" class="oe_inline ms-2" readonly="1" widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                </div>
+                <field name="kio_medical_allowance" string="Medical Allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
 
                 <field name="kio_conveyance_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="kio_food_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
