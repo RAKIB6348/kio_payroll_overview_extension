@@ -115,6 +115,7 @@ class KioPayrollPayslip(models.Model):
     basic_salary = fields.Monetary(compute="_compute_amounts", store=True)
     allowance = fields.Monetary(compute="_compute_amounts", store=True)
     overtime = fields.Monetary(compute="_compute_amounts", store=True)
+    commission = fields.Monetary(compute="_compute_amounts", store=True)
     bonus = fields.Monetary(compute="_compute_amounts", store=True)
     deduction = fields.Monetary(compute="_compute_amounts", store=True)
     gross_salary = fields.Monetary(compute="_compute_amounts", store=True)
@@ -157,17 +158,19 @@ class KioPayrollPayslip(models.Model):
             basic = totals.get("BASIC", 0.0)
             allowance = totals.get("ALW", 0.0)
             overtime = totals.get("OVERTIME", 0.0) or totals.get("OT", 0.0)
+            commission = totals.get("COMMISSION", 0.0) or totals.get("COM", 0.0)
             bonus = totals.get("BONUS", 0.0)
             deduction = abs(totals.get("DED", 0.0) or totals.get("DEDUCTION", 0.0))
             gross = totals.get("GROSS", 0.0)
             if not gross:
-                gross = basic + allowance + overtime + bonus
+                gross = basic + allowance + overtime + commission + bonus
             net = totals.get("NET", 0.0)
             if not net:
                 net = gross - deduction
             slip.basic_salary = basic
             slip.allowance = allowance
             slip.overtime = overtime
+            slip.commission = commission
             slip.bonus = bonus
             slip.deduction = deduction
             slip.gross_salary = gross
@@ -758,6 +761,67 @@ class KioPayrollPayslip(models.Model):
         )
 
     @api.model
+    def _get_payroll_adjustment_amounts(
+        self, model_name, company, date_start, date_end, employee_ids=None, amount_field="amount"
+    ):
+        """Return confirmed adjustment totals grouped by employee for the period.
+
+        Only confirmed records matching employee/company/date range are included.
+        Records already applied to a non-cancelled payslip are excluded when the
+        model supports payroll-application tracking.
+        """
+        Model = self.env.get(model_name)
+        if not Model or "state" not in Model._fields or "date" not in Model._fields:
+            return {}
+        domain = [
+            ("state", "=", "confirmed"),
+            ("company_id", "=", company.id),
+            ("date", ">=", date_start),
+            ("date", "<=", date_end),
+        ]
+        if employee_ids:
+            domain.append(("employee_id", "in", list(employee_ids)))
+        if "applied" in Model._fields and "applied_payslip_id" in Model._fields:
+            domain += ["|", ("applied", "=", False), ("applied_payslip_id.state", "=", "cancel")]
+        rows = Model.read_group(
+            domain,
+            [f"{amount_field}:sum"],
+            ["employee_id"],
+            lazy=False,
+        )
+        amounts = {}
+        sum_key = f"{amount_field}_sum"
+        for row in rows:
+            employee = row.get("employee_id")
+            employee_id = employee[0] if isinstance(employee, (list, tuple)) else employee
+            if employee_id:
+                amounts[employee_id] = row.get(amount_field) or row.get(sum_key) or 0.0
+        return amounts
+
+    @api.model
+    def _get_payroll_adjustment_records(
+        self, model_name, company, date_start, date_end, employee_ids=None
+    ):
+        """Return confirmed adjustment records eligible for payroll inclusion.
+
+        Used only for post-generation tracking (after successful payslip creation).
+        """
+        Model = self.env.get(model_name)
+        if not Model or "state" not in Model._fields or "date" not in Model._fields:
+            return Model.browse() if Model else self.env["ir.model"]  # unreachable fallback
+        domain = [
+            ("state", "=", "confirmed"),
+            ("company_id", "=", company.id),
+            ("date", ">=", date_start),
+            ("date", "<=", date_end),
+        ]
+        if employee_ids:
+            domain.append(("employee_id", "in", list(employee_ids)))
+        if "applied" in Model._fields and "applied_payslip_id" in Model._fields:
+            domain += ["|", ("applied", "=", False), ("applied_payslip_id.state", "=", "cancel")]
+        return Model.search(domain)
+
+    @api.model
     def get_new_payroll_run_data(self, date_start, date_end):
         self._check_payroll_overview_manager()
         try:
@@ -778,11 +842,25 @@ class KioPayrollPayslip(models.Model):
         contracts, ambiguous_employee_ids = self._get_employee_contracts(
             employees, company, date_start, date_end
         )
+        employee_ids = employees.ids
         pending_bonuses = self._get_payroll_bonus_amounts(
-            company, date_start, date_end, employee_ids=employees.ids
+            company, date_start, date_end, employee_ids=employee_ids
+        )
+        # Confirmed adjustments: overtime (attendance/config model, monetary amount),
+        # commission, and deductions. Late deduction is integrated via kio.deduction
+        # confirmed records only; monthly late deduction summaries are not combined
+        # here to avoid double-counting the same penalty.
+        overtime_amounts = self._get_payroll_adjustment_amounts(
+            "kio.overtime", company, date_start, date_end, employee_ids=employee_ids, amount_field="overtime_amount"
+        )
+        commission_amounts = self._get_payroll_adjustment_amounts(
+            "kio.commission", company, date_start, date_end, employee_ids=employee_ids
+        )
+        deduction_amounts = self._get_payroll_adjustment_amounts(
+            "kio.deduction", company, date_start, date_end, employee_ids=employee_ids, amount_field="deduction_amount"
         )
         existing_payslips = self.search([
-            ("employee_id", "in", employees.ids),
+            ("employee_id", "in", employee_ids),
             ("company_id", "=", company.id),
             ("date_from", "<=", date_end),
             ("date_to", ">=", date_start),
@@ -811,11 +889,21 @@ class KioPayrollPayslip(models.Model):
 
             cfg = configs.get(employee.id)
             allowance = (cfg.allowance or 0.0) if cfg else 0.0
-            overtime = 0.0
-            commission = 0.0
-            bonus = pending_bonuses.get(employee.id, 0.0)
-            deduction = 0.0
-            net_pay = basic + allowance + overtime + commission + bonus - deduction
+            overtime = overtime_amounts.get(employee.id, 0.0) or 0.0
+            commission = commission_amounts.get(employee.id, 0.0) or 0.0
+            bonus = pending_bonuses.get(employee.id, 0.0) or 0.0
+            deduction = deduction_amounts.get(employee.id, 0.0) or 0.0
+            # Gross = Basic + Allowances + Overtime + Commission + Bonus; Net = Gross - Deductions
+            gross = basic + allowance + overtime + commission + bonus
+            net_pay = gross - deduction
+            basic = currency.round(basic)
+            allowance = currency.round(allowance)
+            overtime = currency.round(overtime)
+            commission = currency.round(commission)
+            bonus = currency.round(bonus)
+            deduction = currency.round(deduction)
+            gross = currency.round(gross)
+            net_pay = currency.round(net_pay)
 
             calendar = (
                 contract.resource_calendar_id
@@ -909,21 +997,25 @@ class KioPayrollPayslip(models.Model):
         }
 
     @api.model
-    def _prepare_payslip_lines(self, employee, cfg=None, bonus_amount=0.0,
-                               basic=None, allowance=None):
+    def _prepare_payslip_lines(
+        self, employee, cfg=None, bonus_amount=0.0, basic=None, allowance=None,
+        overtime_amount=0.0, commission_amount=0.0, deduction_amount=0.0,
+    ):
         if basic is None:
             basic = (cfg.basic_salary or 0.0) if cfg else 0.0
         if allowance is None:
             allowance = (cfg.allowance or 0.0) if cfg else 0.0
-        overtime = 0.0
+        overtime = overtime_amount or 0.0
+        commission = commission_amount or 0.0
         bonus = bonus_amount or 0.0
-        deduction = 0.0
-        gross = basic + allowance + overtime + bonus
+        deduction = deduction_amount or 0.0
+        gross = basic + allowance + overtime + commission + bonus
         net = gross - deduction
         return [
             Command.create({"name": _("Basic Salary"), "code": "BASIC", "sequence": 1, "amount": basic, "total": basic}),
             Command.create({"name": _("Allowances"), "code": "ALW", "sequence": 5, "amount": allowance, "total": allowance}),
             Command.create({"name": _("Overtime"), "code": "OVERTIME", "sequence": 10, "amount": overtime, "total": overtime}),
+            Command.create({"name": _("Commission"), "code": "COMMISSION", "sequence": 12, "amount": commission, "total": commission}),
             Command.create({"name": _("Bonus"), "code": "BONUS", "sequence": 15, "amount": bonus, "total": bonus}),
             Command.create({"name": _("Deductions"), "code": "DED", "sequence": 90, "amount": deduction, "total": deduction}),
             Command.create({"name": _("Gross"), "code": "GROSS", "sequence": 100, "amount": gross, "total": gross}),
@@ -1009,8 +1101,19 @@ class KioPayrollPayslip(models.Model):
             "company_id": company.id,
             "state": "draft",
         })
+        # Server-side amounts only (frontend values are never trusted).
+        employee_ids = employees.ids
         bonus_amounts = self._get_payroll_bonus_amounts(
-            company, date_start, date_end, employee_ids=employees.ids
+            company, date_start, date_end, employee_ids=employee_ids
+        )
+        overtime_amounts = self._get_payroll_adjustment_amounts(
+            "kio.overtime", company, date_start, date_end, employee_ids=employee_ids, amount_field="overtime_amount"
+        )
+        commission_amounts = self._get_payroll_adjustment_amounts(
+            "kio.commission", company, date_start, date_end, employee_ids=employee_ids
+        )
+        deduction_amounts = self._get_payroll_adjustment_amounts(
+            "kio.deduction", company, date_start, date_end, employee_ids=employee_ids, amount_field="deduction_amount"
         )
         payslip_vals = []
         for employee in employees:
@@ -1030,10 +1133,16 @@ class KioPayrollPayslip(models.Model):
                     bonus_amount=bonus_amounts.get(employee.id, 0.0),
                     basic=contract.wage or 0.0,
                     allowance=(cfg.allowance or 0.0) if cfg else 0.0,
+                    overtime_amount=overtime_amounts.get(employee.id, 0.0),
+                    commission_amount=commission_amounts.get(employee.id, 0.0),
+                    deduction_amount=deduction_amounts.get(employee.id, 0.0),
                 ),
             })
         slips = self.create(payslip_vals)
         self._mark_bonuses_applied(slips)
+        self._mark_payroll_adjustments_applied(
+            slips, company, date_start, date_end, employee_ids=employee_ids
+        )
         return {
             "type": "ir.actions.client",
             "tag": "kio_payroll_overview.batch_details",
@@ -1062,6 +1171,40 @@ class KioPayrollPayslip(models.Model):
             ])
             if bonus_lines:
                 bonus_lines.write({"applied": True, "applied_payslip_id": slip.id})
+
+    @api.model
+    def _mark_adjustments_applied_for_slip(self, slip, model_name, amount_field=None):
+        Model = self.env.get(model_name)
+        if not Model or not slip or "applied" not in Model._fields:
+            return
+        domain = [
+            ("state", "=", "confirmed"),
+            ("company_id", "=", slip.company_id.id),
+            ("employee_id", "=", slip.employee_id.id),
+            ("date", ">=", slip.date_from),
+            ("date", "<=", slip.date_to),
+            "|",
+            ("applied", "=", False),
+            ("applied_payslip_id.state", "=", "cancel"),
+        ]
+        records = Model.search(domain)
+        if records:
+            records.sudo().write({"applied": True, "applied_payslip_id": slip.id})
+
+    @api.model
+    def _mark_payroll_adjustments_applied(
+        self, slips, company, date_start, date_end, employee_ids=None
+    ):
+        # Mark confirmed adjustments included in generated payslips. Called only
+        # after successful payslip creation. Only kio.deduction (confirmed late
+        # deduction records) is included; monthly late deduction summaries are not
+        # consumed here to avoid double-counting.
+        if not slips:
+            return
+        for slip in slips:
+            self._mark_adjustments_applied_for_slip(slip, "kio.overtime")
+            self._mark_adjustments_applied_for_slip(slip, "kio.commission")
+            self._mark_adjustments_applied_for_slip(slip, "kio.deduction")
 
     @api.model
     def get_payroll_overview_data(self, month, year):
@@ -1292,6 +1435,7 @@ class KioPayrollPayslip(models.Model):
                 "basic_salary": currency.round(slip.basic_salary),
                 "allowance": currency.round(slip.allowance),
                 "overtime": currency.round(slip.overtime),
+                "commission": currency.round(slip.commission),
                 "bonus": currency.round(slip.bonus),
                 "deduction": currency.round(slip.deduction),
                 "net_pay": currency.round(net_pay),

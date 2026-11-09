@@ -111,6 +111,21 @@ class KioDeduction(models.Model):
         store=True,
         readonly=True,
     )
+    applied_payslip_id = fields.Many2one(
+        "kio.payroll.payslip",
+        string="Applied Payslip",
+        readonly=True,
+        copy=False,
+        ondelete="set null",
+        index=True,
+    )
+    applied = fields.Boolean(
+        string="Applied to Payroll",
+        default=False,
+        readonly=True,
+        copy=False,
+        index=True,
+    )
 
     _sql_constraints = [
         (

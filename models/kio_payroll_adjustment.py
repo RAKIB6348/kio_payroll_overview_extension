@@ -98,6 +98,22 @@ class KioCommission(models.Model):
     _description = "Commission"
     _inherit = ["mail.thread", "mail.activity.mixin", "kio.payroll.adjustment"]
 
+    applied_payslip_id = fields.Many2one(
+        "kio.payroll.payslip",
+        string="Applied Payslip",
+        readonly=True,
+        copy=False,
+        ondelete="set null",
+        index=True,
+    )
+    applied = fields.Boolean(
+        string="Applied to Payroll",
+        default=False,
+        readonly=True,
+        copy=False,
+        index=True,
+    )
+
 
 class KioDeduction(models.Model):
     _name = "kio.deduction"
