@@ -520,7 +520,11 @@
                                         <div class="col-6">
                                             <div class="o_payroll_period_stat">
                                                 <span class="text-muted">Working Days</span>
-                                                <strong t-esc="state.data.working_days"/>
+                                                <strong t-if="state.data.working_days_available"
+                                                        t-esc="state.data.working_days"
+                                                        t-att-title="state.data.working_calendar_name ? 'Schedule: ' + state.data.working_calendar_name : ''"/>
+                                                <strong t-else="" class="text-muted"
+                                                        t-att-title="state.data.working_days_message || ''">Unavailable</strong>
                                             </div>
                                         </div>
                                     </div>
@@ -537,16 +541,15 @@
                                     <p class="text-muted mb-0">
                                         <t t-esc="selectedCount"/> of <t t-esc="state.data.employee_count"/> selected
                                     </p>
-                                    <p t-if="state.data.missing_contract_count || state.data.missing_wage_count"
-                                       class="text-muted small mb-0 mt-1">
-                                        <t t-if="state.data.missing_contract_count">
-                                            <t t-esc="state.data.missing_contract_count"/> without a contract for this period.
+                                    <p t-if="state.data.ambiguous_contract_count || state.data.invalid_wage_count"
+                                       class="text-warning small mb-0 mt-1">
+                                        <t t-if="state.data.ambiguous_contract_count">
+                                            <t t-esc="state.data.ambiguous_contract_count"/> employee(s) with overlapping Running Contracts are excluded.
                                         </t>
-                                        <t t-if="state.data.missing_contract_count &amp;&amp; state.data.missing_wage_count"> </t>
-                                        <t t-if="state.data.missing_wage_count">
-                                            <t t-esc="state.data.missing_wage_count"/> with no valid contract wage.
+                                        <t t-if="state.data.ambiguous_contract_count &amp;&amp; state.data.invalid_wage_count"> </t>
+                                        <t t-if="state.data.invalid_wage_count">
+                                            <t t-esc="state.data.invalid_wage_count"/> employee(s) with no valid contract wage are excluded.
                                         </t>
-                                        They are shown but cannot be selected.
                                     </p>
                                 </div>
                                 <div class="d-flex flex-column flex-sm-row flex-wrap gap-2">
@@ -611,11 +614,6 @@
                                                         <div class="fw-bold text-truncate" t-esc="row.name"/>
                                                         <div class="text-muted small text-truncate">
                                                             <t t-esc="row.identification_id"/>
-                                                            <span t-if="!row.eligible" class="badge text-bg-warning ms-1"
-                                                                  t-att-title="row.eligibility_reason || ''">
-                                                                <t t-if="!row.has_contract">No contract</t>
-                                                                <t t-else="">No valid wage</t>
-                                                            </span>
                                                             <span t-if="row.has_existing_payslip" class="badge text-bg-info ms-1">Existing payslip</span>
                                                         </div>
                                                     </div>

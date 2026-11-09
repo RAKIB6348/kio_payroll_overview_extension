@@ -1,6 +1,6 @@
 import calendar
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
 
 from odoo import Command, _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -230,32 +230,129 @@ class KioPayrollPayslip(models.Model):
 
     @api.model
     def _get_employee_contracts(self, employees, company, date_start, date_end):
-        """Return the most relevant contract per employee for the period.
+        """Return eligible running contracts per employee for the period.
 
-        A contract is applicable when it overlaps the payroll period:
+        Only standard Odoo 17 running contracts (``state = 'open'``) are
+        considered. A contract is applicable when it overlaps the payroll
+        period:
         date_start <= payroll end and (date_end is empty or date_end >=
-        payroll start). Draft and cancelled contracts are ignored, while
-        all active/running/closed contracts are kept because they may still
-        cover part of the selected period.
+        payroll start).
+
+        The result is ``(contract_by_employee, ambiguous_employee_ids)``.
+        Employees with more than one overlapping running contract are
+        flagged as ambiguous instead of silently choosing one of them.
+        Multiple non-overlapping running contracts are allowed; the most
+        recent contract covering the period is used.
         """
         if not employees or "hr.contract" not in self.env.registry.models:
-            return {}
+            return {}, set()
         contracts = self.env["hr.contract"].search([
             ("employee_id", "in", employees.ids),
             ("company_id", "=", company.id),
             ("active", "=", True),
+            ("state", "=", "open"),
             ("date_start", "<=", date_end),
             "|",
             ("date_end", "=", False),
             ("date_end", ">=", date_start),
-            ("state", "not in", ("draft", "cancel", "cancelled")),
-        ], order="employee_id, date_start desc, id desc")
-        contract_by_employee = {}
+        ], order="employee_id, date_start asc, id asc")
+
+        contracts_by_employee = {}
         for contract in contracts:
-            employee_id = contract.employee_id.id
-            if employee_id not in contract_by_employee:
-                contract_by_employee[employee_id] = contract
-        return contract_by_employee
+            contracts_by_employee.setdefault(
+                contract.employee_id.id, []
+            ).append(contract)
+
+        contract_by_employee = {}
+        ambiguous_employee_ids = set()
+        for employee_id, employee_contracts in contracts_by_employee.items():
+            if len(employee_contracts) == 1:
+                contract_by_employee[employee_id] = employee_contracts[0]
+                continue
+
+            # Multiple running contracts are only safe when they do not
+            # overlap each other. Overlap makes the payable contract
+            # ambiguous for the selected period.
+            overlaps = False
+            for previous, current in zip(
+                employee_contracts, employee_contracts[1:]
+            ):
+                if not previous.date_end or previous.date_end >= current.date_start:
+                    overlaps = True
+                    break
+            if overlaps:
+                ambiguous_employee_ids.add(employee_id)
+            else:
+                # Contracts are sequential: the latest one applies.
+                contract_by_employee[employee_id] = employee_contracts[-1]
+        return contract_by_employee, ambiguous_employee_ids
+
+    @api.model
+    def _count_scheduled_working_days(self, calendar, date_start, date_end,
+                                      resource=None):
+        """Count scheduled working dates in a payroll period.
+
+        Dates are evaluated as calendar-local dates using the working
+        schedule's timezone. Only schedule lines are used; attendance
+        check-ins are deliberately ignored. Split shifts are de-duplicated
+        by collecting distinct dates, and overnight lines are attached to
+        their scheduled start date.
+        """
+        if not calendar or not date_start or not date_end or date_end < date_start:
+            return None
+
+        attendances = calendar.attendance_ids.filtered(
+            lambda attendance: not attendance.display_type
+            and attendance.day_period != "lunch"
+        )
+        if resource:
+            # Include the calendar's common schedule and any schedule
+            # lines configured specifically for this employee resource.
+            attendances = attendances.filtered(
+                lambda attendance: not attendance.resource_id
+                or attendance.resource_id == resource
+            )
+        else:
+            # The company/default calendar reference must not depend on an
+            # arbitrary employee's resource-specific schedule.
+            attendances = attendances.filtered(
+                lambda attendance: not attendance.resource_id
+            )
+        if not attendances:
+            return 0
+
+        attendance_model = self.env["resource.calendar.attendance"]
+        working_dates = set()
+        current_date = date_start
+        while current_date <= date_end:
+            weekday = str(current_date.weekday())
+            week_type = (
+                str(attendance_model.get_week_type(current_date))
+                if calendar.two_weeks_calendar else False
+            )
+            for attendance in attendances:
+                if str(attendance.dayofweek) != weekday:
+                    continue
+                if (
+                    calendar.two_weeks_calendar
+                    and attendance.week_type
+                    and str(attendance.week_type) != week_type
+                ):
+                    continue
+                if attendance.date_from and current_date < attendance.date_from:
+                    continue
+                if attendance.date_to and current_date > attendance.date_to:
+                    continue
+                hour_from = attendance.hour_from or 0.0
+                hour_to = attendance.hour_to or 0.0
+                if hour_from == hour_to:
+                    continue
+                # A non-zero interval is a worked day. hour_to < hour_from
+                # represents an overnight shift and is still valid.
+                working_dates.add(current_date)
+                break
+            current_date += timedelta(days=1)
+        return len(working_dates)
 
     @api.model
     def _get_payroll_bonus_amounts(self, company, date_start, date_end, employee_ids=None):
@@ -283,7 +380,7 @@ class KioPayrollPayslip(models.Model):
             ("active", "=", True),
         ], order="name, id")
         configs = self._get_employee_salary_config(employees, company)
-        contracts = self._get_employee_contracts(
+        contracts, ambiguous_employee_ids = self._get_employee_contracts(
             employees, company, date_start, date_end
         )
         pending_bonuses = self._get_payroll_bonus_amounts(
@@ -299,69 +396,53 @@ class KioPayrollPayslip(models.Model):
         existing_by_employee = {s.employee_id.id for s in existing_payslips}
 
         rows = []
-        working_days_values = []
         seen_employee_ids = set()
-        missing_contract_count = 0
-        missing_wage_count = 0
+        invalid_wage_count = 0
         for employee in employees:
             if employee.id in seen_employee_ids:
                 continue
             seen_employee_ids.add(employee.id)
 
-            cfg = configs.get(employee.id)
             contract = contracts.get(employee.id)
-            contract_wage = contract.wage if contract else None
-            has_wage = contract is not None and (contract_wage or 0.0) > 0
-            eligible = has_wage
-
-            eligibility_reason = False
-            contract_status = contract.state if contract else False
-            contract_status_label = False
-            if contract:
-                contract_status_label = dict(
-                    contract._fields["state"].selection
-                ).get(contract.state, contract.state)
+            # Employees without a unique Running Contract are excluded
+            # completely from the New Payroll Run employee list.
             if not contract:
-                missing_contract_count += 1
-                eligibility_reason = _(
-                    "No active contract overlaps this payroll period."
-                )
-            elif not has_wage:
-                missing_wage_count += 1
-                eligibility_reason = _(
-                    "The applicable contract has no valid wage."
-                )
+                continue
 
-            working_days = (cfg.working_days or 0.0) if cfg else 0.0
-            if eligible:
-                basic = contract_wage or 0.0
-                allowance = (cfg.allowance or 0.0) if cfg else 0.0
-                overtime = 0.0
-                commission = 0.0
-                bonus = pending_bonuses.get(employee.id, 0.0)
-                deduction = 0.0
-                net_pay = basic + allowance + overtime + commission + bonus - deduction
-                working_days_values.append(working_days)
-                amounts = {
-                    "basic_salary": currency.round(basic),
-                    "allowance": currency.round(allowance),
-                    "overtime": currency.round(overtime),
-                    "commission": currency.round(commission),
-                    "bonus": currency.round(bonus),
-                    "deduction": currency.round(deduction),
-                    "net_pay": currency.round(net_pay),
-                }
+            basic = contract.wage or 0.0
+            if basic <= 0:
+                invalid_wage_count += 1
+                continue
+
+            cfg = configs.get(employee.id)
+            allowance = (cfg.allowance or 0.0) if cfg else 0.0
+            overtime = 0.0
+            commission = 0.0
+            bonus = pending_bonuses.get(employee.id, 0.0)
+            deduction = 0.0
+            net_pay = basic + allowance + overtime + commission + bonus - deduction
+
+            calendar = (
+                contract.resource_calendar_id
+                or employee.resource_calendar_id
+                or company.resource_calendar_id
+            )
+            if contract.resource_calendar_id:
+                calendar_source = "contract"
+            elif employee.resource_calendar_id:
+                calendar_source = "employee"
+            elif company.resource_calendar_id:
+                calendar_source = "company"
             else:
-                # Never invent a salary for a missing/invalid contract.
-                amounts = {
-                    "basic_salary": None,
-                    "allowance": None,
-                    "overtime": None,
-                    "commission": None,
-                    "bonus": None,
-                    "deduction": None,
-                    "net_pay": None,
-                }
+                calendar_source = False
+            contract_start = max(date_start, contract.date_start)
+            contract_end = min(date_end, contract.date_end) if contract.date_end else date_end
+            working_days = self._count_scheduled_working_days(
+                calendar,
+                contract_start,
+                contract_end,
+                resource=employee.resource_id,
+            )
 
             rows.append({
                 "employee_id": employee.id,
@@ -370,22 +451,37 @@ class KioPayrollPayslip(models.Model):
                 "avatar_url": f"/web/image/hr.employee/{employee.id}/avatar_128",
                 "department": employee.department_id.display_name or "-",
                 "designation": employee.job_id.display_name or "-",
-                **amounts,
-                "working_days": round(working_days, 2),
-                "eligible": eligible,
-                "eligibility_reason": eligibility_reason,
-                "has_contract": bool(contract),
-                "contract_id": contract.id if contract else False,
-                "contract_name": contract.name if contract else False,
-                "contract_status": contract_status,
-                "contract_status_label": contract_status_label,
+                "basic_salary": currency.round(basic),
+                "allowance": currency.round(allowance),
+                "overtime": currency.round(overtime),
+                "commission": currency.round(commission),
+                "bonus": currency.round(bonus),
+                "deduction": currency.round(deduction),
+                "net_pay": currency.round(net_pay),
+                "working_days": working_days,
+                "working_days_available": working_days is not None,
+                "working_calendar_id": calendar.id if calendar else False,
+                "working_calendar_name": calendar.display_name if calendar else False,
+                "working_days_source": calendar_source,
+                "eligible": True,
+                "contract_id": contract.id,
+                "contract_name": contract.name,
+                "contract_status": contract.state,
+                "contract_status_label": dict(
+                    contract._fields["state"].selection
+                ).get(contract.state, contract.state),
                 "has_existing_payslip": employee.id in existing_by_employee,
             })
 
-        eligible_employee_count = sum(1 for row in rows if row["eligible"])
-        average_working_days = (
-            sum(working_days_values) / len(working_days_values)
-            if working_days_values else 0.0
+        employee_count = len(rows)
+        company_calendar = company.resource_calendar_id
+        payroll_working_days = self._count_scheduled_working_days(
+            company_calendar, date_start, date_end
+        )
+        working_days_available = payroll_working_days is not None
+        working_days_message = (
+            False if working_days_available
+            else _("No default Working Schedule is configured for this company.")
         )
         return {
             "company": {"id": company.id, "name": company.display_name},
@@ -400,12 +496,16 @@ class KioPayrollPayslip(models.Model):
             "date_end": date_end,
             "default_name": "%s Payroll" % date_end.strftime("%B %Y"),
             "payment_date": date_end,
-            "employee_count": eligible_employee_count,
-            "eligible_employee_count": eligible_employee_count,
-            "total_employee_count": len(rows),
-            "missing_contract_count": missing_contract_count,
-            "missing_wage_count": missing_wage_count,
-            "working_days": round(average_working_days, 2),
+            "employee_count": employee_count,
+            "eligible_employee_count": employee_count,
+            "total_employee_count": employee_count,
+            "ambiguous_contract_count": len(ambiguous_employee_ids),
+            "invalid_wage_count": invalid_wage_count,
+            "working_days": payroll_working_days,
+            "working_days_available": working_days_available,
+            "working_days_message": working_days_message,
+            "working_calendar_id": company_calendar.id if company_calendar else False,
+            "working_calendar_name": company_calendar.display_name if company_calendar else False,
             "employees": rows,
             "loan_count": 0,
             "loan_available": False,
@@ -464,19 +564,32 @@ class KioPayrollPayslip(models.Model):
         company = self.env.company
         employees = self.env["hr.employee"].browse(employee_ids).exists()
         configs = self._get_employee_salary_config(employees, company)
-        contracts = self._get_employee_contracts(
+        contracts, ambiguous_employee_ids = self._get_employee_contracts(
             employees, company, date_start, date_end
         )
+        ambiguous = [
+            emp.display_name
+            for emp in employees
+            if emp.id in ambiguous_employee_ids
+        ]
+        if ambiguous:
+            raise ValidationError(_(
+                "The following employees have multiple overlapping Running "
+                "Contracts for this period, so payroll cannot choose one "
+                "automatically: %s."
+            ) % ", ".join(ambiguous))
         ineligible = [
             emp.display_name
             for emp in employees
-            if emp.company_id != company
+            if not emp.active
+            or emp.company_id != company
             or emp.id not in contracts
             or (contracts[emp.id].wage or 0.0) <= 0
         ]
         if ineligible:
             raise ValidationError(_(
-                "The following employees do not have a valid contract wage for this period: %s."
+                "The following employees do not have a valid Running Contract "
+                "with a wage for this period: %s."
             ) % ", ".join(ineligible))
 
         self.env.cr.execute("SELECT pg_advisory_xact_lock(%s, %s)", (0x4B494F, company.id))
