@@ -131,6 +131,14 @@ class KioPayrollPayslip(models.Model):
     kio_payment_move_id = fields.Many2one(
         "account.move", string="Salary Payment Entry", copy=False, readonly=True, check_company=True
     )
+    salary_move_id = fields.Many2one(
+        "account.move",
+        string="Salary Payable Entry",
+        copy=False,
+        readonly=True,
+        check_company=True,
+        help="Posted salary accrual entry used by the standard Register Payment wizard.",
+    )
 
     _sql_constraints = [
         (
@@ -179,10 +187,369 @@ class KioPayrollPayslip(models.Model):
         self.ensure_one()
         return self.company_id.currency_id.round(self.net_pay)
 
+    def _get_kio_payment_partner(self):
+        """Return the employee partner used on the salary payable entry."""
+        self.ensure_one()
+        employee = self.employee_id
+        partner = employee.work_contact_id or employee.user_partner_id
+        if not partner:
+            raise UserError(_(
+                "Employee %(employee)s has no payment partner. Set the "
+                "employee's Work Contact (or linked user) before registering "
+                "the salary payment.",
+                employee=employee.display_name,
+            ))
+        if partner.company_id and partner.company_id != self.company_id:
+            raise UserError(_(
+                "The payment partner of %(employee)s belongs to another "
+                "company. Please use a contact from %(company)s.",
+                employee=employee.display_name,
+                company=self.company_id.display_name,
+            ))
+        return partner
+
+    def _get_kio_payment_reference(self):
+        """Memo/reference shared by the accrual entry and the payment."""
+        self.ensure_one()
+        batch_reference = (
+            self.batch_id.name
+            or self.name
+            or _("Payroll")
+        )
+        return "%s - %s" % (batch_reference, self.employee_id.display_name)
+
+    def _get_kio_salary_payable_lines(self, move=None, only_due=False):
+        """Return the payable lines of the salary accrual entry.
+
+        :param move: optional account.move; defaults to ``salary_move_id``.
+        :param only_due: keep only lines that still have an unreconciled
+            amount. Fully reconciled lines are returned otherwise so payment
+            matching/status can still be inspected.
+        """
+        self.ensure_one()
+        move = move or self.salary_move_id
+        if not move or move.state != "posted":
+            return self.env["account.move.line"]
+        lines = move.line_ids.filtered(
+            lambda line: line.account_id.account_type == "liability_payable"
+        )
+        if only_due:
+            currency = move.company_id.currency_id
+            lines = lines.filtered(
+                lambda line: not currency.is_zero(line.amount_residual)
+            )
+        return lines
+
+    def _get_kio_salary_payment_info(self):
+        """Return paid/unpaid amounts derived from reconciliation.
+
+        The salary payable entry is the source of truth. Partial payments are
+        therefore supported automatically: the payable line residual is the
+        unpaid salary and the difference is the paid amount.
+        """
+        self.ensure_one()
+        currency = self.company_id.currency_id or self.currency_id
+        net_amount = currency.round(self.net_pay)
+        paid_amount = 0.0
+        unpaid_amount = net_amount if net_amount > 0 else 0.0
+        source = "none"
+
+        payable_lines = self._get_kio_salary_payable_lines()
+        if payable_lines:
+            source = "salary_move"
+            residual = sum(abs(line.amount_residual) for line in payable_lines)
+            unpaid_amount = min(net_amount, currency.round(residual))
+            unpaid_amount = max(unpaid_amount, 0.0)
+            paid_amount = max(currency.round(net_amount - unpaid_amount), 0.0)
+        elif self.salary_move_id and self.salary_move_id.state == "draft":
+            source = "draft_salary_move"
+        else:
+            legacy_move = self.payment_move_id or self.kio_payment_move_id
+            if self.paid or (legacy_move and legacy_move.state == "posted"):
+                source = "legacy_payment"
+                paid_amount = max(net_amount, 0.0)
+                unpaid_amount = 0.0
+
+        if net_amount <= 0:
+            is_paid = False
+            payment_state = "unpaid"
+        elif unpaid_amount <= 0:
+            is_paid = True
+            payment_state = "paid"
+        elif paid_amount > 0:
+            is_paid = False
+            payment_state = "partial"
+        else:
+            is_paid = False
+            payment_state = "unpaid"
+
+        return {
+            "net_amount": net_amount,
+            "paid_amount": paid_amount,
+            "unpaid_amount": unpaid_amount,
+            "is_paid": is_paid,
+            "payment_state": payment_state,
+            "source": source,
+        }
+
     def _is_kio_salary_paid(self):
         self.ensure_one()
-        move = self.payment_move_id or self.kio_payment_move_id
-        return bool(self.paid or (move and move.state == "posted"))
+        return self._get_kio_salary_payment_info()["is_paid"]
+
+    def _validate_kio_salary_accounting(self):
+        """Validate the company payroll accounting configuration."""
+        self.ensure_one()
+        company = self.company_id
+        journal = company.salary_journal_id
+        debit_account = company.salary_debit_account_id
+        credit_account = company.salary_credit_account_id
+
+        missing = []
+        if not journal:
+            missing.append(_("Salary Journal"))
+        if not debit_account:
+            missing.append(_("Salary Debit Account"))
+        if not credit_account:
+            missing.append(_("Salary Credit Account"))
+        if missing:
+            raise UserError(_(
+                "Payroll accounting is not configured. Set the following "
+                "values in Payroll Accounting Configuration: %(fields)s.",
+                fields=", ".join(missing),
+            ))
+
+        if journal.company_id and journal.company_id != company:
+            raise UserError(_(
+                "Salary Journal must belong to %(company)s.",
+                company=company.display_name,
+            ))
+        if journal.type != "general":
+            raise UserError(_(
+                "Salary Journal must be a Miscellaneous journal."
+            ))
+        if debit_account.deprecated or debit_account.account_type not in (
+            "expense",
+            "expense_direct_cost",
+            "expense_depreciation",
+        ):
+            raise UserError(_(
+                "Salary Debit Account must be an active expense account."
+            ))
+        if credit_account.deprecated or credit_account.account_type != "liability_payable":
+            raise UserError(_(
+                "Salary Credit Account must be an active Payable account. "
+                "Odoo's Register Payment wizard only reconciles Payable or "
+                "Receivable journal items."
+            ))
+        return journal, debit_account, credit_account
+
+    def _find_kio_existing_salary_move(self, debit_account, credit_account,
+                                       partner, net_amount):
+        """Find a compatible posted salary accrual to avoid duplicates."""
+        self.ensure_one()
+        if not self.date_from or not self.date_to or net_amount <= 0:
+            return self.env["account.move"]
+        candidates = self.env["account.move.line"].search([
+            ("company_id", "=", self.company_id.id),
+            ("move_id.state", "=", "posted"),
+            ("move_id.move_type", "=", "entry"),
+            ("account_id", "=", credit_account.id),
+            ("partner_id", "=", partner.id),
+            ("credit", ">", 0.0),
+            ("date", ">=", self.date_from),
+            ("date", "<=", self.date_to),
+        ], order="date desc, id desc")
+        currency = self.company_id.currency_id
+        for line in candidates:
+            move = line.move_id
+            payable_total = sum(
+                abs(item.balance)
+                for item in move.line_ids
+                if item.account_id == credit_account
+            )
+            expense_total = sum(
+                item.debit
+                for item in move.line_ids
+                if item.account_id == debit_account
+            )
+            if (
+                currency.compare_amounts(payable_total, net_amount) == 0
+                and currency.compare_amounts(expense_total, net_amount) == 0
+            ):
+                return move
+        return self.env["account.move"]
+
+    def _ensure_kio_salary_payable_move(self):
+        """Return a posted salary accrual entry, creating it only if needed.
+
+        The entry debits the configured salary expense account and credits the
+        configured salary payable account. The payable line is linked to the
+        employee payment partner so it is eligible for the standard Register
+        Payment wizard.
+        """
+        self.ensure_one()
+        net_amount = self._get_kio_net_pay_amount()
+        if net_amount <= 0:
+            raise UserError(_("This payslip has no payable net salary amount."))
+
+        self.env.cr.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)", (0x4B4950, self.id)
+        )
+        # Re-read after taking the lock to avoid duplicate accrual entries
+        # when Pay Now is clicked more than once concurrently.
+        self.invalidate_recordset(["salary_move_id"])
+
+        move = self.salary_move_id
+        if move and move.state == "cancel":
+            move = self.env["account.move"]
+        if move and move.state == "posted":
+            return move
+        if move and move.state == "draft":
+            move.action_post()
+            return move
+
+        journal, debit_account, credit_account = (
+            self._validate_kio_salary_accounting()
+        )
+        partner = self._get_kio_payment_partner()
+
+        existing = self._find_kio_existing_salary_move(
+            debit_account, credit_account, partner, net_amount
+        )
+        if existing:
+            self.sudo().write({"salary_move_id": existing.id})
+            return existing
+
+        move_date = (
+            self.batch_id.payment_date
+            or self.date_to
+            or fields.Date.context_today(self)
+        )
+        reference = self._get_kio_payment_reference()
+        move = self.env["account.move"].create({
+            "move_type": "entry",
+            "journal_id": journal.id,
+            "date": move_date,
+            "ref": reference,
+            "company_id": self.company_id.id,
+            "line_ids": [
+                Command.create({
+                    "name": reference,
+                    "account_id": debit_account.id,
+                    "partner_id": partner.id,
+                    "debit": net_amount,
+                    "credit": 0.0,
+                }),
+                Command.create({
+                    "name": reference,
+                    "account_id": credit_account.id,
+                    "partner_id": partner.id,
+                    "debit": 0.0,
+                    "credit": net_amount,
+                }),
+            ],
+        })
+        move.action_post()
+        self.sudo().write({"salary_move_id": move.id})
+        return move
+
+    def _sync_kio_payment_state(self, payment_move=None):
+        """Persist the payment status derived from the payable reconciliation."""
+        self.ensure_one()
+        info = self._get_kio_salary_payment_info()
+        values = {"paid": info["is_paid"]}
+        if payment_move:
+            values["payment_move_id"] = payment_move.id
+            values["payment_date"] = payment_move.date
+        elif info["is_paid"]:
+            values["payment_date"] = fields.Date.context_today(self)
+        self.sudo().write(values)
+
+    def _prepare_kio_pay_now_action(self):
+        """Build the standard Register Payment action for this payslip."""
+        self.ensure_one()
+        if self.state == "cancel" or (
+            self.batch_id and self.batch_id.state == "cancel"
+        ):
+            raise UserError(_("A cancelled payroll cannot be paid."))
+
+        net_amount = self._get_kio_net_pay_amount()
+        if net_amount <= 0:
+            raise UserError(_("This payslip has no payable net salary amount."))
+
+        self._get_kio_payment_partner()
+        self._validate_kio_salary_accounting()
+
+        if self._get_kio_salary_payment_info()["is_paid"]:
+            raise UserError(_(
+                "The salary of %(employee)s is already fully paid.",
+                employee=self.employee_id.display_name,
+            ))
+
+        self._ensure_kio_salary_payable_move()
+        if self._get_kio_salary_payment_info()["is_paid"]:
+            raise UserError(_(
+                "The salary of %(employee)s is already fully paid.",
+                employee=self.employee_id.display_name,
+            ))
+
+        payable_lines = self._get_kio_salary_payable_lines(only_due=True)
+        if not payable_lines:
+            raise UserError(_(
+                "No unpaid salary payable line was found for %(employee)s. "
+                "Check the salary payable entry and its reconciliation.",
+                employee=self.employee_id.display_name,
+            ))
+        if any(not line.partner_id for line in payable_lines):
+            raise UserError(_(
+                "The salary payable entry of %(employee)s is not linked to an "
+                "employee payment partner.",
+                employee=self.employee_id.display_name,
+            ))
+
+        reference = self._get_kio_payment_reference()
+        context = {
+            "active_model": "account.move.line",
+            "active_ids": payable_lines.ids,
+            "default_communication": reference,
+            "kio_payroll_pay_now": True,
+            "kio_payroll_slip_id": self.id,
+        }
+        payment_date = self.batch_id.payment_date
+        if payment_date:
+            context["default_payment_date"] = payment_date
+
+        view = self.env.ref(
+            "account.view_account_payment_register_form", raise_if_not_found=False
+        )
+        return {
+            "name": _("Register Payment"),
+            "type": "ir.actions.act_window",
+            "res_model": "account.payment.register",
+            "view_mode": "form",
+            "views": [(view.id if view else False, "form")],
+            "target": "new",
+            "context": context,
+        }
+
+    @api.model
+    def action_payroll_pay_now(self, slip_id):
+        """Open the standard Register Payment wizard for a payslip."""
+        self._check_payroll_overview_manager()
+        try:
+            slip_id = int(slip_id)
+        except (TypeError, ValueError):
+            raise ValidationError(_("A valid payslip is required."))
+        slip = self.search([
+            ("id", "=", slip_id),
+            ("company_id", "=", self.env.company.id),
+        ], limit=1)
+        if not slip:
+            raise AccessError(_(
+                "The selected payslip is unavailable for the current company."
+            ))
+        slip.check_access_rights("read")
+        return slip._prepare_kio_pay_now_action()
 
     @api.model
     def _get_payroll_overview_period(self, month, year):
@@ -716,8 +1083,15 @@ class KioPayrollPayslip(models.Model):
         gross_salary = sum(payslips.mapped("gross_salary"))
         total_deductions = sum(payslips.mapped("deduction"))
         net_salary = sum(payslips.mapped("net_pay"))
-        total_paid_salary = sum(p.net_pay for p in payslips if p._is_kio_salary_paid())
-        total_unpaid_salary = sum(p.net_pay for p in payslips if not p._is_kio_salary_paid())
+        payment_infos = {
+            slip.id: slip._get_kio_salary_payment_info() for slip in payslips
+        }
+        total_paid_salary = sum(
+            info["paid_amount"] for info in payment_infos.values()
+        )
+        total_unpaid_salary = sum(
+            info["unpaid_amount"] for info in payment_infos.values()
+        )
         cur = company.currency_id
         confirmed_bonus_total = 0.0
         if "kio.bonus.line" in self.env.registry.models:
@@ -744,9 +1118,15 @@ class KioPayrollPayslip(models.Model):
         detail_rows = []
         for slip in payslips.sorted(key=lambda s: (s.employee_id.name or "", s.id)):
             emp = slip.employee_id
+            info = payment_infos[slip.id]
             detail_rows.append({
+                "slip_id": slip.id,
+                "batch_id": slip.batch_id.id,
+                "batch_name": slip.batch_id.name or "-",
                 "employee_id": emp.id,
                 "employee_name": emp.display_name,
+                "name": emp.display_name,
+                "identification_id": emp.identification_id or "-",
                 "department": emp.department_id.display_name or "-",
                 "designation": emp.job_id.display_name or "-",
                 "basic_salary": cur.round(slip.basic_salary),
@@ -755,6 +1135,16 @@ class KioPayrollPayslip(models.Model):
                 "bonus": cur.round(slip.bonus),
                 "deduction": cur.round(slip.deduction),
                 "net_pay": cur.round(slip.net_pay),
+                "net_salary": cur.round(slip.net_pay),
+                "paid_amount": cur.round(info["paid_amount"]),
+                "unpaid_amount": cur.round(info["unpaid_amount"]),
+                "paid": info["is_paid"],
+                "payment_state": info["payment_state"],
+                "payment_state_label": dict([
+                    ("paid", _("Paid")),
+                    ("partial", _("Partially Paid")),
+                    ("unpaid", _("Unpaid")),
+                ])[info["payment_state"]],
             })
 
         return {
@@ -777,6 +1167,8 @@ class KioPayrollPayslip(models.Model):
                 "total_bonus": cur.round(confirmed_bonus_total),
             },
             "recent_batches": recent_batches,
+            "paid_employees": [row for row in detail_rows if row["paid"]],
+            "unpaid_employees": [row for row in detail_rows if not row["paid"]],
             "employee_payroll_details": {
                 "rows": detail_rows,
                 "totals": {
@@ -799,12 +1191,22 @@ class KioPayrollPayslip(models.Model):
         rows = []
         total_net = 0.0
         total_paid = 0.0
+        total_unpaid = 0.0
+        state_labels = {
+            "paid": _("Paid"),
+            "partial": _("Partially Paid"),
+            "unpaid": _("Unpaid"),
+        }
+        batch_payable = batch.state != "cancel"
         for slip in slips:
             net_pay = slip._get_kio_net_pay_amount()
-            is_paid = slip._is_kio_salary_paid()
+            info = slip._get_kio_salary_payment_info()
+            is_paid = info["is_paid"]
+            paid_amount = currency.round(info["paid_amount"])
+            unpaid_amount = currency.round(info["unpaid_amount"])
             total_net += net_pay
-            if is_paid:
-                total_paid += net_pay
+            total_paid += paid_amount
+            total_unpaid += unpaid_amount
             emp = slip.employee_id
             rows.append({
                 "slip_id": slip.id,
@@ -820,18 +1222,27 @@ class KioPayrollPayslip(models.Model):
                 "bonus": currency.round(slip.bonus),
                 "deduction": currency.round(slip.deduction),
                 "net_pay": currency.round(net_pay),
+                "net_salary": currency.round(net_pay),
+                "paid_amount": paid_amount,
+                "unpaid_amount": unpaid_amount,
                 "payslip_number": slip.number or slip.name or "-",
-                "payment_state": "paid" if is_paid else "unpaid",
-                "can_pay": not is_paid and slip.state == "done",
+                "payment_state": info["payment_state"],
+                "payment_state_label": state_labels[info["payment_state"]],
+                "paid": is_paid,
+                "can_pay": (
+                    batch_payable
+                    and slip.state != "cancel"
+                    and net_pay > 0
+                    and info["payment_state"] != "paid"
+                ),
             })
-        total_unpaid = currency.round(total_net - total_paid)
-        date_start = batch.date_start
         totals = {
             "total_employees": len(slips.mapped("employee_id")),
             "total_net_salary": currency.round(total_net),
             "total_paid_salary": currency.round(total_paid),
-            "total_unpaid_salary": total_unpaid,
+            "total_unpaid_salary": currency.round(total_unpaid),
         }
+        date_start = batch.date_start
         employees = [
             dict(
                 r,
@@ -906,7 +1317,14 @@ class KioPayrollPayslip(models.Model):
         # Minimal compatibility for custom report template; preserve existing keys where possible.
         self.ensure_one()
         cur = self.company_id.currency_id
-        is_paid = self._is_kio_salary_paid()
+        info = self._get_kio_salary_payment_info()
+        is_paid = info["is_paid"]
+        payment_state = info["payment_state"]
+        payment_status_labels = {
+            "paid": _("Paid"),
+            "partial": _("Partially Paid"),
+            "unpaid": _("Unpaid"),
+        }
         def fmt(v):
             return "%s %.2f" % (cur.symbol or cur.name or "", v or 0.0)
         return {
@@ -917,8 +1335,8 @@ class KioPayrollPayslip(models.Model):
             "department": self.employee_id.department_id.display_name or "-",
             "period": "%s - %s" % (self.date_from or "", self.date_to or ""),
             "batch_name": self.batch_id.name or "-",
-            "payment_status": _("Paid") if is_paid else _("Unpaid"),
-            "payment_state": "paid" if is_paid else "unpaid",
+            "payment_status": payment_status_labels[payment_state],
+            "payment_state": payment_state,
             "payment_date": self.payment_date or (self.batch_id.payment_date if self.batch_id else False) or "-",
             "basic_salary": self.basic_salary,
             "allowance": self.allowance,
@@ -931,8 +1349,8 @@ class KioPayrollPayslip(models.Model):
             "overtime_formatted": fmt(self.overtime),
             "bonus_formatted": fmt(self.bonus),
             "deduction_formatted": fmt(self.deduction),
-            "paid_amount_formatted": fmt(self.net_pay if is_paid else 0.0),
-            "unpaid_amount_formatted": fmt(0.0 if is_paid else self.net_pay),
+            "paid_amount_formatted": fmt(info["paid_amount"]),
+            "unpaid_amount_formatted": fmt(info["unpaid_amount"]),
         }
 
 

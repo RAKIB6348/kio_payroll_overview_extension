@@ -9,4 +9,5 @@ from . import kio_bonus_type
 from . import kio_bonus
 from . import res_company
 from . import res_config_settings
+from . import account_payment_register
 
