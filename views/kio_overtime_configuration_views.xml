@@ -66,6 +66,7 @@
                                     <field name="per_hour_rate" column_invisible="parent.calculation_type == 'percentage'"/>
                                     <field name="per_day_rate" column_invisible="parent.calculation_type == 'percentage'"/>
                                     <field name="overtime_percentage" column_invisible="parent.calculation_type != 'percentage'"/>
+                                    <field name="overtime_amount" readonly="1"/>
                                 </tree>
                             </field>
                         </page>

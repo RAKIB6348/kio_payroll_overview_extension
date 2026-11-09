@@ -363,6 +363,12 @@ class KioOvertimeConfigurationLine(models.Model):
     per_hour_rate = fields.Float(string="Per Hour Rate (BDT)", default=0.0, digits=(16, 2))
     per_day_rate = fields.Float(string="Per Day Rate (BDT)", default=0.0, digits=(16, 2))
     overtime_percentage = fields.Float(string="Overtime Rate (%)", default=0.0, digits=(16, 2))
+    overtime_amount = fields.Monetary(
+        string="Overtime Amount (BDT)",
+        compute="_compute_overtime_amount",
+        currency_field="currency_id",
+        readonly=True,
+    )
     company_id = fields.Many2one(
         related="configuration_id.company_id",
         string="Company",
@@ -495,6 +501,26 @@ class KioOvertimeConfigurationLine(models.Model):
             line.has_applicable_contract = True
             line.basic_salary = basic_salary
             line.per_hour_salary = per_hour_salary
+
+    @api.depends(
+        "configuration_id.calculation_type",
+        "per_hour_salary",
+        "overtime_percentage",
+        "per_hour_rate",
+    )
+    def _compute_overtime_amount(self):
+        for line in self:
+            calc_type = line.configuration_id.calculation_type or "fixed"
+            if calc_type == "percentage":
+                per_hour_salary = line.per_hour_salary or 0.0
+                overtime_percentage = line.overtime_percentage or 0.0
+                line.overtime_amount = (per_hour_salary * overtime_percentage / 100.0) if per_hour_salary and overtime_percentage else 0.0
+            else:
+                line.overtime_amount = line.per_hour_rate or 0.0
+
+    @api.onchange("overtime_percentage", "per_hour_rate", "employee_id")
+    def _onchange_overtime_amount_inputs(self):
+        self._compute_overtime_amount()
 
     @api.constrains("per_hour_rate", "per_day_rate", "overtime_percentage")
     def _check_rates(self):
