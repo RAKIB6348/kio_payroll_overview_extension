@@ -45,6 +45,17 @@ class KioOvertimeConfiguration(models.Model):
         tracking=True,
         check_company=True,
         domain="[('company_id', '=', company_id), ('active', '=', True), ('department_id', '=', department_id)] if department_id else [('company_id', '=', company_id), ('active', '=', True)]",
+        help="Legacy single-employee selection kept for backward compatibility.",
+    )
+    employee_ids = fields.Many2many(
+        "hr.employee",
+        "kio_overtime_configuration_employee_rel",
+        "configuration_id",
+        "employee_id",
+        string="Employees",
+        tracking=True,
+        check_company=True,
+        domain="[('company_id', '=', company_id), ('active', '=', True)]",
     )
     calculation_type = fields.Selection(
         [("fixed", "Fixed Amount"), ("percentage", "Percentage")],
@@ -90,20 +101,24 @@ class KioOvertimeConfiguration(models.Model):
         normalized = []
         for vals in vals_list:
             vals = dict(vals)
-            # Safe default for existing/programmatic creates without explicit scope.
+            # Safe default / backward compatibility for creates without explicit scope.
             if not vals.get("employee_scope"):
-                if vals.get("employee_id"):
+                if vals.get("employee_ids") or vals.get("employee_id"):
                     vals["employee_scope"] = "individual"
                 elif vals.get("department_id"):
                     vals["employee_scope"] = "department"
                 else:
                     vals["employee_scope"] = "all"
+            if vals.get("employee_scope") == "individual" and vals.get("employee_id") and not vals.get("employee_ids"):
+                vals["employee_ids"] = [(6, 0, [vals["employee_id"]])]
             vals = self._normalize_scope_vals(vals)
             normalized.append(vals)
         records = super().create(normalized)
         for rec in records:
             if not rec.name or rec.name == _("New"):
                 rec.name = "OTC/%05d" % rec.id
+            if rec.employee_scope == "individual" and not rec.employee_ids and rec.employee_id:
+                rec.sudo().write({"employee_ids": [(6, 0, [rec.employee_id.id])], "employee_id": False})
         return records
 
     def _check_draft(self):
@@ -137,6 +152,14 @@ class KioOvertimeConfiguration(models.Model):
                     "Reset or change the conflicting configuration before confirming."
                 ) % conflicts.employee_id.display_name)
 
+    def _get_individual_employees(self):
+        self.ensure_one()
+        company = self.company_id or self.env.company
+        employees = self.employee_ids.filtered(lambda e: e.active and e.company_id == company)
+        if not employees and self.employee_id:
+            employees = self.employee_id.filtered(lambda e: e.active and e.company_id == company)
+        return employees
+
     def _normalize_scope_vals(self, vals):
         """Normalize Department/Employee values according to Employee Scope (draft-safe helper)."""
         scope = vals.get("employee_scope")
@@ -144,24 +167,28 @@ class KioOvertimeConfiguration(models.Model):
             return vals
         vals = dict(vals)
         if scope == "all":
-            vals.setdefault("department_id", False)
-            vals.setdefault("employee_id", False)
             vals["department_id"] = False
             vals["employee_id"] = False
+            vals["employee_ids"] = [(5, 0, 0)]
         elif scope == "department":
-            vals.setdefault("employee_id", False)
             vals["employee_id"] = False
+            vals["employee_ids"] = [(5, 0, 0)]
         elif scope == "individual":
-            vals.setdefault("department_id", False)
             vals["department_id"] = False
+            # Keep legacy employee_id in sync when employee_ids is explicitly provided.
+            if "employee_ids" in vals and "employee_id" not in vals:
+                commands = vals.get("employee_ids") or []
+                if commands and isinstance(commands, list) and commands[0][0] == 6:
+                    ids = commands[0][2] or []
+                    vals["employee_id"] = ids[0] if len(ids) == 1 else False
         return vals
 
     def _check_scope_requirements(self):
         for rec in self:
             if rec.employee_scope == "department" and not rec.department_id:
                 raise ValidationError(_("Please select a Department for Employee Scope 'Department'."))
-            if rec.employee_scope == "individual" and not rec.employee_id:
-                raise ValidationError(_("Please select an Employee for Employee Scope 'Individual Employee'."))
+            if rec.employee_scope == "individual" and not rec._get_individual_employees():
+                raise ValidationError(_("Please select at least one Employee for Employee Scope 'Individual Employee'."))
 
     def _employees_for_selection(self):
         self.ensure_one()
@@ -171,9 +198,7 @@ class KioOvertimeConfiguration(models.Model):
         scope = self.employee_scope or "all"
 
         if scope == "individual":
-            if not self.employee_id:
-                return Employee.browse()
-            return self.employee_id.filtered(lambda e: e.active and e.company_id == company)
+            return self._get_individual_employees()
 
         if scope == "department":
             if not self.department_id:
@@ -220,32 +245,50 @@ class KioOvertimeConfiguration(models.Model):
             if rec.employee_scope == "all":
                 rec.department_id = False
                 rec.employee_id = False
+                rec.employee_ids = [(5, 0, 0)]
             elif rec.employee_scope == "department":
                 rec.employee_id = False
+                rec.employee_ids = [(5, 0, 0)]
             elif rec.employee_scope == "individual":
                 rec.department_id = False
+                if not rec.employee_ids and rec.employee_id:
+                    rec.employee_ids = [(6, 0, [rec.employee_id.id])]
+                    rec.employee_id = False
             rec._refresh_lines_from_scope()
 
     @api.onchange("department_id")
     def _onchange_department_id(self):
         for rec in self:
-            if rec.employee_scope == "individual" and rec.department_id:
+            if rec.state != "draft":
+                continue
+            if rec.employee_scope in ("individual", "all") and rec.department_id:
                 rec.employee_scope = "department"
                 rec.employee_id = False
-            if rec.employee_scope == "all" and rec.department_id:
-                rec.employee_scope = "department"
-            if rec.employee_id and rec.department_id and rec.employee_id.department_id != rec.department_id:
-                rec.employee_id = False
+                rec.employee_ids = [(5, 0, 0)]
+            rec._refresh_lines_from_scope()
+
+    @api.onchange("employee_ids")
+    def _onchange_employee_ids(self):
+        for rec in self:
+            if rec.state != "draft":
+                continue
+            if rec.employee_scope != "individual":
+                rec.employee_scope = "individual"
+                rec.department_id = False
+            rec.employee_id = False
             rec._refresh_lines_from_scope()
 
     @api.onchange("employee_id")
     def _onchange_employee_id(self):
+        # Backward compatibility for legacy single-employee field.
         for rec in self:
-            if rec.employee_scope == "department" and rec.employee_id:
+            if rec.state != "draft":
+                continue
+            if rec.employee_id:
                 rec.employee_scope = "individual"
                 rec.department_id = False
-            if rec.employee_scope == "all" and rec.employee_id:
-                rec.employee_scope = "individual"
+                rec.employee_ids = [(6, 0, [rec.employee_id.id])]
+                rec.employee_id = False
             rec._refresh_lines_from_scope()
 
     def action_confirm(self):
@@ -267,8 +310,20 @@ class KioOvertimeConfiguration(models.Model):
 
     def write(self, vals):
         vals = dict(vals)
+        # Backward compatibility: legacy employee_id -> employee_ids for individual scope.
+        scope = vals.get("employee_scope")
+        if not scope and len(self) == 1:
+            scope = self.employee_scope
+        if vals.get("employee_id") and "employee_ids" not in vals and (scope == "individual" or not scope):
+            vals["employee_ids"] = [(6, 0, [vals["employee_id"]])]
+            vals["employee_id"] = False
+            if not vals.get("employee_scope"):
+                vals["employee_scope"] = "individual"
+                scope = "individual"
         if vals.get("employee_scope"):
             vals = self._normalize_scope_vals(vals)
+        elif "employee_ids" in vals and scope == "individual":
+            vals["employee_id"] = False
         for rec in self:
             if rec.state == "confirmed" and set(vals) - {"state", "message_main_attachment_id"}:
                 # allow explicit reset to draft

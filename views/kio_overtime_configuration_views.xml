@@ -41,11 +41,13 @@
                                    invisible="employee_scope != 'department'"
                                    required="employee_scope == 'department'"
                                    options="{'no_create': True}"/>
-                            <field name="employee_id" readonly="state == 'confirmed'"
+                            <field name="employee_id" invisible="1"/>
+                            <field name="employee_ids" readonly="state == 'confirmed'" widget="many2many_tags"
                                    invisible="employee_scope != 'individual'"
                                    required="employee_scope == 'individual'"
                                    options="{'no_create': True}"
-                                   domain="[('company_id', '=', company_id), ('active', '=', True)]"/>
+                                   domain="[('company_id', '=', company_id), ('active', '=', True)]"
+                                   placeholder="Select employees..."/>
                             <field name="calculation_type" readonly="state == 'confirmed'"/>
                         </group>
                         <group>
