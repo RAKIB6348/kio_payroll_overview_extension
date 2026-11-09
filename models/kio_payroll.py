@@ -552,6 +552,34 @@ class KioPayrollPayslip(models.Model):
         return slip._prepare_kio_pay_now_action()
 
     @api.model
+    def action_payroll_download_payslip(self, slip_id):
+        """Download the custom payslip PDF for the selected payslip."""
+        self._check_payroll_overview_manager()
+        try:
+            slip_id = int(slip_id)
+        except (TypeError, ValueError):
+            raise ValidationError(_("A valid payslip is required."))
+        slip = self.search([
+            ("id", "=", slip_id),
+            ("company_id", "=", self.env.company.id),
+        ], limit=1)
+        if not slip:
+            raise AccessError(_(
+                "The selected payslip is unavailable for the current company."
+            ))
+        slip.check_access_rights("read")
+        report = self.env.ref(
+            "kio_payroll_overview_extension.action_report_employee_payslip",
+            raise_if_not_found=False,
+        )
+        if not report:
+            raise UserError(_(
+                "The Employee Payslip report is not available. "
+                "Please update the KIO Payroll Overview Extension module."
+            ))
+        return report.report_action(slip)
+
+    @api.model
     def _get_payroll_overview_period(self, month, year):
         try:
             month = int(month)
