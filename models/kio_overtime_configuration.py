@@ -256,6 +256,17 @@ class KioOvertimeConfigurationLine(models.Model):
         store=True,
         readonly=True,
     )
+    currency_id = fields.Many2one(
+        related="configuration_id.company_id.currency_id",
+        string="Currency",
+        readonly=True,
+    )
+    basic_salary = fields.Monetary(
+        string="Basic Salary (BDT)",
+        compute="_compute_basic_salary",
+        currency_field="currency_id",
+        readonly=True,
+    )
     per_hour_rate = fields.Float(string="Per Hour Rate (BDT)", default=0.0, digits=(16, 2))
     per_day_rate = fields.Float(string="Per Day Rate (BDT)", default=0.0, digits=(16, 2))
     overtime_percentage = fields.Float(string="Overtime Rate (%)", default=0.0, digits=(16, 2))
@@ -265,6 +276,25 @@ class KioOvertimeConfigurationLine(models.Model):
         store=True,
         readonly=True,
     )
+
+    @api.depends("employee_id", "company_id")
+    def _compute_basic_salary(self):
+        Contract = self.env.get("hr.contract")
+        today = fields.Date.context_today(self)
+        for line in self:
+            wage = 0.0
+            if line.employee_id and line.company_id and Contract:
+                contract = Contract.search([
+                    ("employee_id", "=", line.employee_id.id),
+                    ("company_id", "=", line.company_id.id),
+                    ("state", "=", "open"),
+                    ("date_start", "<=", today),
+                    "|",
+                    ("date_end", "=", False),
+                    ("date_end", ">=", today),
+                ], order="date_start desc, id desc", limit=1)
+                wage = contract.wage or 0.0
+            line.basic_salary = wage
 
     @api.constrains("per_hour_rate", "per_day_rate", "overtime_percentage")
     def _check_rates(self):

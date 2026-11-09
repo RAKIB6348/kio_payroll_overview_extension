@@ -333,10 +333,12 @@ class KioOvertime(models.Model):
                     elif wage <= 0:
                         review_reasons.append(_("Applicable contract wage is unavailable for percentage overtime calculation."))
                     else:
-                        hourly_rate = wage / monthly_hours
+                        basic_hourly_rate = wage / monthly_hours
+                        overtime_hourly_rate = basic_hourly_rate * (percentage / 100.0)
+                        hourly_rate = overtime_hourly_rate
                         overtime_rate = percentage
                         overtime_amount = company.currency_id.round(
-                            overtime_hours * hourly_rate * (percentage / 100.0)
+                            overtime_hours * overtime_hourly_rate
                         )
                 else:
                     rate = float(config.get("per_hour_rate") or 0.0)
@@ -555,10 +557,12 @@ class KioOvertime(models.Model):
                     calendar = self._get_employee_calendar(employee, workday_date)
                     monthly_hours = self._get_monthly_scheduled_hours(calendar, workday_date, tz)
                     if percentage > 0 and wage > 0 and monthly_hours > 0:
-                        hourly_rate = wage / monthly_hours
+                        basic_hourly_rate = wage / monthly_hours
+                        overtime_hourly_rate = basic_hourly_rate * (percentage / 100.0)
+                        hourly_rate = overtime_hourly_rate
                         overtime_rate = percentage
                         overtime_amount = company.currency_id.round(
-                            overtime_hours * hourly_rate * (percentage / 100.0)
+                            overtime_hours * overtime_hourly_rate
                         )
                 else:
                     rate = float(config.get("per_hour_rate") or 0.0)
