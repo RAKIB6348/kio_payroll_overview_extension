@@ -192,19 +192,18 @@
         <field name="target">current</field>
     </record>
 
-    <!-- Deductions -->
+    <!-- Late Deductions -->
     <record id="view_kio_deduction_tree" model="ir.ui.view">
         <field name="name">kio.deduction.tree</field>
         <field name="model">kio.deduction</field>
         <field name="arch" type="xml">
-            <tree>
-                <field name="name"/>
-                <field name="company_id" column_invisible="1"/>
+            <tree default_order="date desc, actual_check_in desc, id desc">
                 <field name="employee_id"/>
-                <field name="date"/>
-                <field name="amount" widget="monetary"/>
-                <field name="currency_id" column_invisible="1"/>
-                <field name="state" widget="badge" decoration-info="state == 'draft'" decoration-success="state == 'confirmed'" decoration-danger="state == 'cancelled'"/>
+                <field name="scheduled_check_in"/>
+                <field name="actual_check_in"/>
+                <field name="late_minutes"/>
+                <field name="date" column_invisible="1"/>
+                <field name="company_id" column_invisible="1"/>
             </tree>
         </field>
     </record>
@@ -215,41 +214,87 @@
         <field name="arch" type="xml">
             <form>
                 <header>
-                    <button name="action_confirm" type="object" string="Confirm" class="btn-primary" invisible="state != 'draft'"/>
-                    <button name="action_cancel" type="object" string="Cancel" invisible="state == 'cancelled'"/>
-                    <button name="action_draft" type="object" string="Reset to Draft" invisible="state != 'cancelled'"/>
+                    <button name="action_confirm" type="object" string="Confirm" class="btn-primary" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state != 'draft'"/>
+                    <button name="action_cancel" type="object" string="Cancel" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state == 'cancelled'"/>
+                    <button name="action_draft" type="object" string="Reset to Draft" groups="kio_payroll_overview_extension.group_kio_payroll_manager" invisible="state != 'cancelled'"/>
+                    <button name="action_sync_attendance" type="object" string="Sync Attendance" class="btn-secondary" groups="kio_payroll_overview_extension.group_kio_payroll_manager"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,cancelled"/>
                 </header>
                 <sheet>
                     <group>
                         <group>
                             <field name="company_id" invisible="1"/>
-                            <field name="name"/>
-                            <field name="employee_id"/>
-                            <field name="date"/>
+                            <field name="currency_id" invisible="1"/>
+                            <field name="name" readonly="state == 'confirmed'"/>
+                            <field name="employee_id" readonly="state == 'confirmed'"/>
+                            <field name="date" readonly="state == 'confirmed'"/>
+                            <field name="scheduled_check_in"/>
+                            <field name="actual_check_in"/>
                         </group>
                         <group>
-                            <field name="amount"/>
-                            <field name="currency_id" invisible="1"/>
+                            <field name="late_minutes"/>
+                            <field name="deduction_amount"/>
+                            <field name="amount" invisible="1"/>
+                            <field name="source" readonly="1"/>
                         </group>
                     </group>
-                    <group>
-                        <field name="description" placeholder="Description..."/>
-                    </group>
+                    <notebook>
+                        <page string="Attendance References" name="attendance_refs">
+                            <field name="attendance_ids" readonly="1">
+                                <tree>
+                                    <field name="employee_id"/>
+                                    <field name="check_in"/>
+                                    <field name="check_out"/>
+                                    <field name="worked_hours"/>
+                                </tree>
+                            </field>
+                        </page>
+                        <page string="Description" name="description">
+                            <field name="description" placeholder="Description..."/>
+                        </page>
+                    </notebook>
                 </sheet>
                 <chatter/>
             </form>
         </field>
     </record>
 
+    <record id="view_kio_deduction_search" model="ir.ui.view">
+        <field name="name">kio.deduction.search</field>
+        <field name="model">kio.deduction</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="employee_id"/>
+                <field name="name"/>
+                <filter name="today" string="Today" domain="[('date', '=', context_today().strftime('%Y-%m-%d'))]"/>
+                <filter name="this_month" string="This Month" domain="[('date', '&gt;=', context_today().strftime('%Y-%m-01'))]"/>
+                <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                <filter name="confirmed" string="Confirmed" domain="[('state', '=', 'confirmed')]"/>
+                <separator/>
+                <filter name="date_filter" string="Date" date="date"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_kio_deduction_sync_attendance" model="ir.actions.server">
+        <field name="name">Sync Attendance</field>
+        <field name="model_id" ref="model_kio_deduction"/>
+        <field name="binding_model_id" ref="model_kio_deduction"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">action = model.action_sync_attendance()</field>
+        <field name="groups_id" eval="[(4, ref('kio_payroll_overview_extension.group_kio_payroll_manager'))]"/>
+    </record>
+
     <record id="action_kio_deduction" model="ir.actions.act_window">
-        <field name="name">Deductions</field>
+        <field name="name">Late Deductions</field>
         <field name="res_model">kio.deduction</field>
         <field name="view_mode">tree,form</field>
+        <field name="search_view_id" ref="view_kio_deduction_search"/>
+        <field name="context">{'search_default_this_month': 1}</field>
         <field name="target">current</field>
     </record>
 
-    <!-- Submenus under Payroll Management (parent defined in kio_bonus_views.xml) -->
     <menuitem id="menu_kio_overtime"
               name="Overtime"
               parent="menu_payroll_management"

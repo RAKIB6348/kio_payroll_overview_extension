@@ -10,6 +10,7 @@
         "security/kio_payroll_security.xml",
         "security/ir.model.access.csv",
         "data/kio_bonus_type_data.xml",
+        "data/kio_late_deduction_cron.xml",
         "views/payroll_overview_views.xml",
         "views/payroll_report_views.xml",
         "views/kio_bonus_views.xml",
