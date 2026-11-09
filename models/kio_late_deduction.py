@@ -356,34 +356,55 @@ class KioDeduction(models.Model):
 
     @api.model
     def _cron_daily_late_attendance_sync(self):
-        """Every-minute scheduler: process each employee once per workday when
-        local scheduled start + 30 minutes has passed. Single-company compatible.
+        """Lightweight periodic dispatcher for late attendance evaluation.
+
+        Evaluates each employee only when the employee's local scheduled
+        working start time + 30 minutes has passed (from the applicable
+        resource.calendar). Supports employee/company timezones, different
+        shifts, overnight schedules, weekends/non-working days, and missed-run
+        recovery over a limited lookback window. No absent marking when
+        attendance is not yet synchronized; existing grace/deduction policies
+        are preserved.
         """
-        now = fields.Datetime.now()
+        now = fields.Datetime.now()  # naive UTC
+        now_utc = pytz.UTC.localize(now)
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", (2017040001,))
+        locked = self.env.cr.fetchone()
+        if not locked or not locked[0]:
+            return
+
+        lookback_days = 7
         employees = self.env["hr.employee"].search([("active", "=", True)])
         for employee in employees:
             company = employee.company_id or self.env.company
             tz = self._get_tz(employee)
-            local_today = now.astimezone(pytz.UTC).astimezone(tz).date() if now.tzinfo else pytz.UTC.localize(now).astimezone(tz).date()
-            calendar = self._get_employee_calendar(employee, local_today)
-            scheduled_utc, workday_date = self._get_calendar_day_start(employee, calendar, local_today, tz)
-            if not scheduled_utc or not workday_date:
-                continue
-            if now < scheduled_utc + timedelta(minutes=30):
-                continue  # do not process future / before threshold
-            existing = self.search([
-                ("employee_id", "=", employee.id),
-                ("date", "=", workday_date),
-                ("company_id", "=", company.id),
-            ], limit=1)
-            if existing and existing.state in ("confirmed", "cancelled"):
-                continue
-            if existing and existing.source == "manual":
-                continue
-            # Safe rerun: if we already have an attendance-sourced record with actual check-in, it's processed.
-            if existing and existing.source in ("attendance", "cron") and existing.actual_check_in:
-                continue
-            self._process_employee_workday(employee, workday_date, scheduled_utc, allow_no_checkin=False)
+            local_now = now_utc.astimezone(tz)
+            local_today = local_now.date()
+            for offset in range(lookback_days):
+                candidate_day = local_today - timedelta(days=offset)
+                calendar = self._get_employee_calendar(employee, candidate_day)
+                scheduled_utc, workday_date = self._get_calendar_day_start(
+                    employee, calendar, candidate_day, tz
+                )
+                if not scheduled_utc or not workday_date:
+                    continue
+                if now < scheduled_utc + timedelta(minutes=30):
+                    continue  # do not process future / before threshold
+                existing = self.search([
+                    ("employee_id", "=", employee.id),
+                    ("date", "=", workday_date),
+                    ("company_id", "=", company.id),
+                ], limit=1)
+                if existing and existing.state in ("confirmed", "cancelled"):
+                    continue
+                if existing and existing.source == "manual":
+                    continue
+                # Safe rerun: attendance/cron record with actual check-in is processed.
+                if existing and existing.source in ("attendance", "cron") and existing.actual_check_in:
+                    continue
+                self._process_employee_workday(
+                    employee, workday_date, scheduled_utc, allow_no_checkin=False
+                )
 
     # Keep manual sync action for authorized users.
     def action_sync_attendance(self):

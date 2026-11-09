@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo noupdate="1">
     <record id="ir_cron_kio_daily_late_attendance_sync" model="ir.cron">
-        <field name="name">Daily Late Attendance Sync</field>
+        <field name="name">Late Attendance Dispatcher</field>
         <field name="model_id" ref="model_kio_deduction"/>
         <field name="state">code</field>
         <field name="code">model._cron_daily_late_attendance_sync()</field>
-        <field name="interval_number">1</field>
+        <field name="interval_number">15</field>
         <field name="interval_type">minutes</field>
         <field name="numbercall">-1</field>
         <field name="active">True</field>
