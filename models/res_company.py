@@ -36,25 +36,37 @@ class ResCompany(models.Model):
         help="Liability account credited for salary payable.",
     )
 
-    kio_overtime_multiplier = fields.Float(
-        string="Overtime Multiplier",
-        default=1.5,
-        help="Documented default policy multiplier (e.g. 1.5). Monetary overtime "
-             "is only calculated when 'Enable Overtime Monetary Calculation' is enabled.",
-    )
     kio_overtime_monetary_enabled = fields.Boolean(
         string="Enable Overtime Monetary Calculation",
         default=False,
         help="When enabled, confirmed/applicable overtime hours are converted to "
-             "amounts using wage, monthly scheduled hours, and the overtime multiplier. "
-             "When disabled, overtime hours are shown but amount is not calculated.",
+             "amounts using Per Hour Rate. When disabled, overtime hours are shown "
+             "but amount is not calculated.",
+    )
+    kio_overtime_per_hour_rate = fields.Float(
+        string="Per Hour Rate (BDT)",
+        default=0.0,
+        digits=(16, 2),
+        help="Company-wide fixed hourly rate used for overtime: "
+             "Overtime Amount = Overtime Hours × Per Hour Rate.",
+    )
+    kio_overtime_per_day_rate = fields.Float(
+        string="Per Day Rate (BDT)",
+        default=0.0,
+        digits=(16, 2),
+        help="Company-wide fixed daily rate reserved for future daily-rate-based payroll calculations.",
     )
 
-    @api.constrains("kio_overtime_multiplier")
-    def _check_kio_overtime_multiplier(self):
+    @api.constrains(
+        "kio_overtime_per_hour_rate",
+        "kio_overtime_per_day_rate",
+    )
+    def _check_kio_overtime_rates(self):
         for company in self:
-            if company.kio_overtime_multiplier < 0:
-                raise ValidationError(_("Overtime multiplier cannot be negative."))
+            if company.kio_overtime_per_hour_rate < 0:
+                raise ValidationError(_("Per Hour Rate cannot be negative."))
+            if company.kio_overtime_per_day_rate < 0:
+                raise ValidationError(_("Per Day Rate cannot be negative."))
 
     @api.constrains(
         "salary_journal_id",

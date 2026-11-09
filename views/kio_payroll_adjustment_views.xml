@@ -56,7 +56,6 @@
                             <field name="worked_hours"/>
                             <field name="overtime_hours"/>
                             <field name="hourly_rate"/>
-                            <field name="overtime_rate"/>
                             <field name="overtime_amount"/>
                             <field name="amount" invisible="1"/>
                             <field name="source" readonly="1"/>

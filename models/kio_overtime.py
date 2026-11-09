@@ -273,9 +273,17 @@ class KioOvertime(models.Model):
 
     @api.model
     def _get_overtime_policy(self, company):
-        multiplier = float(company.kio_overtime_multiplier or 0.0)
         enabled = bool(company.kio_overtime_monetary_enabled)
-        return multiplier, enabled
+        per_hour_rate = float(company.kio_overtime_per_hour_rate or 0.0)
+        if not per_hour_rate:
+            icp = self.env["ir.config_parameter"].sudo().get_param(
+                "kio_payroll_overview_extension.overtime_per_hour_rate", "0.0"
+            )
+            try:
+                per_hour_rate = float(icp or 0.0)
+            except (TypeError, ValueError):
+                per_hour_rate = 0.0
+        return enabled, per_hour_rate
 
     @api.model
     def _compute_day_values(self, employee, day_date, attendances):
@@ -306,20 +314,19 @@ class KioOvertime(models.Model):
         hourly_rate = 0.0
         overtime_rate = 0.0
         if overtime_hours > 0 and not review_reasons:
-            wage, wage_issue = self._get_applicable_wage(employee, day_date, company)
-            monthly_hours = self._get_monthly_scheduled_hours(calendar, day_date, tz)
-            multiplier, enabled = self._get_overtime_policy(company)
-            if wage_issue:
-                review_reasons.append(wage_issue)
-            elif monthly_hours <= 0:
-                review_reasons.append(_("Monthly scheduled working hours are unavailable."))
-            elif not enabled or multiplier <= 0:
-                # Explicitly enabled policy required before monetary calculation.
+            enabled, per_hour_rate = self._get_overtime_policy(company)
+            if not enabled:
+                # Monetary calculation disabled: keep hours, no amount.
                 overtime_amount = 0.0
+            elif per_hour_rate <= 0:
+                review_reasons.append(
+                    _("Per Hour Rate is not configured. Set Payroll > Configuration > Settings > Attendance Overtime Policy > Per Hour Rate (BDT) before enabling monetary overtime calculation.")
+                )
             else:
-                hourly_rate = wage / monthly_hours
-                overtime_rate = multiplier
-                overtime_amount = company.currency_id.round(overtime_hours * hourly_rate * multiplier)
+                hourly_rate = per_hour_rate
+                overtime_amount = company.currency_id.round(
+                    overtime_hours * per_hour_rate
+                )
 
         vals = {
             "name": self._attendance_reference(employee, day_date),

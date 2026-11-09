@@ -5,10 +5,13 @@ SALARY_SETTING_FIELDS = frozenset({
     "salary_journal_id",
     "salary_debit_account_id",
     "salary_credit_account_id",
-    "kio_overtime_multiplier",
     "kio_overtime_monetary_enabled",
 })
-SALARY_SETTINGS_WRITE_FIELDS = SALARY_SETTING_FIELDS | {"company_id"}
+OVERTIME_RATE_CONFIG_FIELDS = {
+    "kio_overtime_per_hour_rate": "kio_payroll_overview_extension.overtime_per_hour_rate",
+    "kio_overtime_per_day_rate": "kio_payroll_overview_extension.overtime_per_day_rate",
+}
+SALARY_SETTINGS_WRITE_FIELDS = SALARY_SETTING_FIELDS | set(OVERTIME_RATE_CONFIG_FIELDS) | {"company_id"}
 
 PAYROLL_SETTINGS_GROUPS = (
     "kio_payroll_overview_extension.group_kio_payroll_manager",
@@ -37,15 +40,22 @@ class ResConfigSettings(models.TransientModel):
         related="company_id.salary_credit_account_id",
         readonly=False,
     )
-    kio_overtime_multiplier = fields.Float(
-        related="company_id.kio_overtime_multiplier",
-        readonly=False,
-        string="Overtime Multiplier",
-    )
     kio_overtime_monetary_enabled = fields.Boolean(
         related="company_id.kio_overtime_monetary_enabled",
         readonly=False,
         string="Enable Overtime Monetary Calculation",
+    )
+    kio_overtime_per_hour_rate = fields.Float(
+        string="Per Hour Rate (BDT)",
+        config_parameter="kio_payroll_overview_extension.overtime_per_hour_rate",
+        default=0.0,
+        digits=(16, 2),
+    )
+    kio_overtime_per_day_rate = fields.Float(
+        string="Per Day Rate (BDT)",
+        config_parameter="kio_payroll_overview_extension.overtime_per_day_rate",
+        default=0.0,
+        digits=(16, 2),
     )
 
     def _is_salary_settings_manager(self):
@@ -82,29 +92,53 @@ class ResConfigSettings(models.TransientModel):
         }
         return salary_values
 
+    def _extract_overtime_rate_config_values(self, vals):
+        values = {}
+        for field_name, param in OVERTIME_RATE_CONFIG_FIELDS.items():
+            if field_name in vals:
+                values[field_name] = (param, vals.pop(field_name))
+        return values
+
+    def _persist_overtime_rate_config_values(self, company, values):
+        ICP = self.env["ir.config_parameter"].sudo()
+        company_vals = {}
+        for field_name, (param, value) in values.items():
+            ICP.set_param(param, value if value not in (False, None) else "0.0")
+            company_vals[field_name] = value or 0.0
+        if company_vals and company:
+            company.sudo().write(company_vals)
+
     @api.model_create_multi
     def create(self, vals_list):
         cleaned_vals_list = []
         salary_values_list = []
+        overtime_values_list = []
         for vals in vals_list:
             vals = dict(vals)
             self._check_salary_settings_write_access(vals)
             salary_values_list.append(self._extract_salary_values(vals))
+            overtime_values_list.append(self._extract_overtime_rate_config_values(vals))
             cleaned_vals_list.append(vals)
         records = super().create(cleaned_vals_list)
-        for record, salary_values in zip(records, salary_values_list):
+        for record, salary_values, overtime_values in zip(records, salary_values_list, overtime_values_list):
             if salary_values:
                 record.company_id.sudo().write(salary_values)
+            if overtime_values:
+                record._persist_overtime_rate_config_values(record.company_id, overtime_values)
         return records
 
     def write(self, vals):
         vals = dict(vals)
         self._check_salary_settings_write_access(vals)
         salary_values = self._extract_salary_values(vals)
+        overtime_values = self._extract_overtime_rate_config_values(vals)
         result = super().write(vals)
-        if salary_values:
+        if salary_values or overtime_values:
             for record in self:
-                record.company_id.sudo().write(salary_values)
+                if salary_values:
+                    record.company_id.sudo().write(salary_values)
+                if overtime_values:
+                    record._persist_overtime_rate_config_values(record.company_id, overtime_values)
         return result
 
     def execute(self):
