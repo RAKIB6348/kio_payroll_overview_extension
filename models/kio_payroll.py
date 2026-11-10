@@ -36,7 +36,7 @@ class KioPayrollBatch(models.Model):
     state = fields.Selection(
         [
             ("draft", "Draft"),
-            ("done", "Done"),
+                ("done", "Confirmed"),
             ("cancel", "Cancelled"),
         ],
         default="draft",
@@ -52,6 +52,10 @@ class KioPayrollBatch(models.Model):
         string="Total Net", compute="_compute_payslip_stats", currency_field="currency_id"
     )
     note = fields.Text()
+    salary_move_id = fields.Many2one(
+        "account.move", string="Payroll Journal Entry", readonly=True,
+        copy=False, check_company=True,
+    )
 
     @api.depends("payslip_ids", "payslip_ids.employee_id", "payslip_ids.net_pay")
     def _compute_payslip_stats(self):
@@ -66,6 +70,27 @@ class KioPayrollBatch(models.Model):
         for batch in self:
             if batch.date_start and batch.date_end and batch.date_end < batch.date_start:
                 raise ValidationError(_("The end date must be on or after the start date."))
+
+    def unlink(self):
+        moves = self.mapped("salary_move_id")
+        for move in moves.filtered(lambda item: item.state == "posted"):
+            if any(
+                line.matched_debit_ids or line.matched_credit_ids
+                for line in move.line_ids
+            ):
+                raise UserError(_(
+                    "Payroll batch %(batch)s cannot be deleted because its salary "
+                    "journal entry has reconciled payments. Unreconcile or reverse "
+                    "those payments first.",
+                    batch=(self.filtered(lambda record: record.salary_move_id == move)[:1].name),
+                ))
+        for move in moves:
+            if move.state == "posted":
+                move.button_draft()
+            if move.state == "draft":
+                move.button_cancel()
+            move.with_context(force_delete=True).unlink()
+        return super().unlink()
 
 
 class KioPayrollPayslip(models.Model):
@@ -245,8 +270,10 @@ class KioPayrollPayslip(models.Model):
         move = move or self.salary_move_id
         if not move or move.state != "posted":
             return self.env["account.move.line"]
+        partner = self._get_kio_payment_partner()
         lines = move.line_ids.filtered(
             lambda line: line.account_id.account_type == "liability_payable"
+            and line.partner_id == partner
         )
         if only_due:
             currency = move.company_id.currency_id
@@ -403,6 +430,15 @@ class KioPayrollPayslip(models.Model):
         Payment wizard.
         """
         self.ensure_one()
+        if self.batch_id and self.batch_id.salary_move_id:
+            move = self.batch_id.salary_move_id
+            if move.state == "posted":
+                self.sudo().write({"salary_move_id": move.id})
+                return move
+            if move.state == "draft":
+                move.action_post()
+                self.sudo().write({"salary_move_id": move.id})
+                return move
         net_amount = self._get_kio_net_pay_amount()
         if net_amount <= 0:
             raise UserError(_("This payslip has no payable net salary amount."))
@@ -1140,7 +1176,7 @@ class KioPayrollPayslip(models.Model):
             "payment_date": payment_date,
             "payroll_type": payroll_type,
             "company_id": company.id,
-            "state": "draft",
+            "state": "done",
         })
         # Server-side amounts only (frontend values are never trusted).
         employee_ids = employees.ids
@@ -1185,6 +1221,7 @@ class KioPayrollPayslip(models.Model):
                 ),
             })
         slips = self.create(payslip_vals)
+        self._post_batch_salary_entry(batch, slips)
         self._mark_bonuses_applied(slips)
         self._mark_payroll_adjustments_applied(
             slips, company, date_start, date_end, employee_ids=employee_ids
@@ -1200,6 +1237,46 @@ class KioPayrollPayslip(models.Model):
                 "kio_payroll_year": date_start.year,
             },
         }
+
+    @api.model
+    def _post_batch_salary_entry(self, batch, slips):
+        """Post one consolidated salary accrual with employee payable lines."""
+        if not slips:
+            return self.env["account.move"]
+        total_net = batch.currency_id.round(sum(slips.mapped("net_pay")))
+        if total_net <= 0:
+            raise UserError(_("The payroll batch net total must be greater than zero."))
+        journal, debit_account, credit_account = slips[:1]._validate_kio_salary_accounting()
+        line_commands = [Command.create({
+            "name": batch.name,
+            "account_id": debit_account.id,
+            "debit": total_net,
+            "credit": 0.0,
+        })]
+        for slip in slips:
+            amount = slip._get_kio_net_pay_amount()
+            if amount <= 0:
+                continue
+            partner = slip._get_kio_payment_partner()
+            line_commands.append(Command.create({
+                "name": slip._get_kio_payment_reference(),
+                "account_id": credit_account.id,
+                "partner_id": partner.id,
+                "debit": 0.0,
+                "credit": amount,
+            }))
+        move = self.env["account.move"].create({
+            "move_type": "entry",
+            "journal_id": journal.id,
+            "date": batch.payment_date or batch.date_end,
+            "ref": batch.name,
+            "company_id": batch.company_id.id,
+            "line_ids": line_commands,
+        })
+        move.action_post()
+        batch.sudo().write({"salary_move_id": move.id})
+        slips.sudo().write({"salary_move_id": move.id})
+        return move
 
     @api.model
     def _mark_bonuses_applied(self, slips):
@@ -1529,8 +1606,22 @@ class KioPayrollPayslip(models.Model):
             "date_end": batch.date_end,
             "month": date_start.month if date_start else False,
             "year": date_start.year if date_start else False,
-            "state": batch.state,
-            "state_label": dict(batch._fields["state"].selection).get(batch.state, batch.state),
+            "state": (
+                "paid"
+                if slips and all(
+                    slip._get_kio_salary_payment_info()["is_paid"]
+                    for slip in slips
+                )
+                else batch.state
+            ),
+            "state_label": (
+                _("Paid")
+                if slips and all(
+                    slip._get_kio_salary_payment_info()["is_paid"]
+                    for slip in slips
+                )
+                else dict(batch._fields["state"].selection).get(batch.state, batch.state)
+            ),
             "total_employees": len(slips.mapped("employee_id")),
             "working_days": batch_working_days,
             "working_days_available": batch_working_days_available,

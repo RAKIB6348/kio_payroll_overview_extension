@@ -846,19 +846,18 @@
                                                       t-esc="row.payment_state_label"/>
                                             </td>
                                             <td class="text-center text-nowrap">
-                                                <t t-if="row.paid">
-                                                    <button type="button" class="btn btn-primary btn-sm text-nowrap"
-                                                            t-att-aria-label="'Download payslip for ' + row.name"
+                                                <div class="d-flex justify-content-center gap-2">
+                                                    <button type="button" class="btn btn-outline-primary btn-sm text-nowrap"
+                                                            t-att-aria-label="'Open payslip for ' + row.name"
                                                             t-on-click="() => this.onDownloadPayslip(row)">
-                                                        <i class="fa fa-download me-1" aria-hidden="true"/> Download Payslip
+                                                        <i class="fa fa-file-text-o me-1" aria-hidden="true"/> Payslip
                                                     </button>
-                                                </t>
-                                                <t t-else="">
                                                     <button type="button" class="btn btn-success btn-sm text-nowrap"
+                                                            t-att-disabled="!row.can_pay"
                                                             t-on-click="() => this.onPayNow(row)">
-                                                        Pay Now
+                                                        <i class="fa fa-credit-card me-1" aria-hidden="true"/> Payment
                                                     </button>
-                                                </t>
+                                                </div>
                                             </td>
                                         </tr>
                                     </tbody>
