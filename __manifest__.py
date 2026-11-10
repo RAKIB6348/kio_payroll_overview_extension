@@ -14,6 +14,7 @@
         "data/kio_late_deduction_cron.xml",
         "data/kio_overtime_cron.xml",
         "views/payroll_overview_views.xml",
+        "views/res_config_settings_views.xml",
         "views/payroll_report_views.xml",
         "views/payroll_batch_report_views.xml",
         "views/kio_bonus_views.xml",
@@ -22,7 +23,7 @@
         "views/kio_payroll_views.xml",
         "views/kio_overtime_configuration_views.xml",
         "views/hr_contract_allowance_views.xml",
-        "views/res_config_settings_views.xml",
+
     ],
     "assets": {
         "web.assets_backend": [
@@ -35,4 +36,3 @@
     "application": False,
     "auto_install": False,
 }
-
