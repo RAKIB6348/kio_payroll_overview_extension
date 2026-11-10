@@ -691,8 +691,10 @@ class KioPayrollPayslip(models.Model):
             year = int(year)
         except (TypeError, ValueError):
             raise ValidationError(_("Month and year must be valid numbers."))
-        if month not in range(1, 13) or year not in range(1, 10000):
-            raise ValidationError(_("Month must be between 1 and 12 and year must be valid."))
+        if month not in range(0, 13) or year not in range(1, 10000):
+            raise ValidationError(_("Month must be between 0 and 12 and year must be valid."))
+        if month == 0:
+            return month, year, date(year, 1, 1), date(year, 12, 31)
         return (
             month,
             year,
@@ -1400,16 +1402,17 @@ class KioPayrollPayslip(models.Model):
             ("date_start", ">=", period_start),
             ("date_end", "<=", period_end),
         ], order="date_start desc, id desc")
-        total_employees_count = self.env["hr.employee"].search_count([
-            ("company_id", "=", company.id),
-            ("active", "=", True),
-        ])
+        # Period headcount is distinct employees with eligible payslips, not
+        # the sum of employee counts across batches (an employee may have
+        # multiple payslips/batches in an all-months view).
+        payroll_employee_ids = payslips.mapped("employee_id").ids
+        total_employees_count = len(set(payroll_employee_ids))
         basic_salary = 0.0
         if "hr.contract" in self.env.registry.models:
             employees = self.env["hr.employee"].search([
+                ("id", "in", payroll_employee_ids),
                 ("company_id", "=", company.id),
-                ("active", "=", True),
-            ])
+            ]) if payroll_employee_ids else self.env["hr.employee"]
             if employees:
                 contracts = self.env["hr.contract"].search([
                     ("employee_id", "in", employees.ids),
@@ -1448,7 +1451,8 @@ class KioPayrollPayslip(models.Model):
             )
 
         recent_batches = []
-        for batch in batches[:10]:
+        visible_batches = batches if month == 0 else batches[:10]
+        for batch in visible_batches:
             batch_slips = payslips.filtered(lambda s: s.batch_id.id == batch.id)
             recent_batches.append({
                 "id": batch.id,

@@ -18,6 +18,7 @@ export class PayrollOverview extends Component {
         const month = Number(context.kio_payroll_month) || today.getMonth() + 1;
         const year = Number(context.kio_payroll_year) || currentYear;
         this.months = [
+            [0, "All Months"],
             [1, "January"], [2, "February"], [3, "March"],
             [4, "April"], [5, "May"], [6, "June"],
             [7, "July"], [8, "August"], [9, "September"],
