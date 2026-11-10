@@ -852,10 +852,14 @@
                                                             t-on-click="() => this.onDownloadPayslip(row)">
                                                         <i class="fa fa-file-text-o me-1" aria-hidden="true"/> Payslip
                                                     </button>
-                                                    <button type="button" class="btn btn-success btn-sm text-nowrap"
-                                                            t-att-disabled="!row.can_pay"
+                                                    <button t-if="row.can_pay" type="button" class="btn btn-success btn-sm text-nowrap"
                                                             t-on-click="() => this.onPayNow(row)">
                                                         <i class="fa fa-credit-card me-1" aria-hidden="true"/> Payment
+                                                    </button>
+                                                    <button t-if="row.can_show_payments" type="button"
+                                                            class="btn btn-outline-secondary btn-sm text-nowrap"
+                                                            t-on-click="() => this.onShowPayments(row)">
+                                                        <i class="fa fa-list-alt me-1" aria-hidden="true"/> Show Payment
                                                     </button>
                                                 </div>
                                             </td>

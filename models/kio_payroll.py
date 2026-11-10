@@ -631,6 +631,60 @@ class KioPayrollPayslip(models.Model):
         return report.report_action(slip)
 
     @api.model
+    def action_payroll_show_payments(self, slip_id):
+        """Open payments reconciled against this payslip's payable line(s)."""
+        self._check_payroll_overview_manager()
+        try:
+            slip_id = int(slip_id)
+        except (TypeError, ValueError):
+            raise ValidationError(_("A valid payslip is required."))
+        company = self.env.company
+        slip = self.search([
+            ("id", "=", slip_id),
+            ("company_id", "=", company.id),
+        ], limit=1)
+        if not slip:
+            raise AccessError(_(
+                "The selected payslip is unavailable for the current company."
+            ))
+        slip.check_access_rights("read")
+        slip.check_access_rule("read")
+
+        payable_lines = slip._get_kio_salary_payable_lines()
+        payment_moves = (
+            payable_lines.mapped("matched_debit_ids.debit_move_id.move_id")
+            | payable_lines.mapped("matched_credit_ids.credit_move_id.move_id")
+        ).filtered(lambda move: move != slip.salary_move_id and move.state == "posted")
+        legacy_payment_moves = (slip.payment_move_id | slip.kio_payment_move_id).filtered(
+            lambda move: move.state == "posted"
+        )
+        payments = (payment_moves | legacy_payment_moves).mapped("payment_id").filtered(
+            lambda payment: payment.company_id == company
+        )
+        payments.check_access_rights("read")
+        payments.check_access_rule("read")
+        if not payments:
+            raise UserError(_("No registered payments are linked to this payslip."))
+
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Payments: %s") % slip.employee_id.display_name,
+            "res_model": "account.payment",
+            "view_mode": "tree,form",
+            "views": [
+                (self.env.ref("account.view_account_payment_tree").id, "tree"),
+                (self.env.ref("account.view_account_payment_form").id, "form"),
+            ],
+            "domain": [("id", "in", payments.ids)],
+            "context": {
+                "create": False,
+                "default_company_id": company.id,
+                "search_default_group_by_partner": False,
+            },
+            "target": "current",
+        }
+
+    @api.model
     def _get_payroll_overview_period(self, month, year):
         try:
             month = int(month)
@@ -1578,6 +1632,7 @@ class KioPayrollPayslip(models.Model):
                     and net_pay > 0
                     and info["payment_state"] != "paid"
                 ),
+                "can_show_payments": info["payment_state"] in ("partial", "paid"),
             })
         totals = {
             "total_employees": len(slips.mapped("employee_id")),

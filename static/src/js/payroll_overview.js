@@ -943,6 +943,33 @@ export class PayrollBatchDetails extends Component {
         }
     }
 
+    async onShowPayments(row) {
+        if (!row || !row.slip_id) {
+            this.notification.add("No payslip associated with this employee.", {
+                type: "danger",
+                title: "Show Payment",
+            });
+            return;
+        }
+        try {
+            const action = await this.orm.call(
+                "kio.payroll.payslip",
+                "action_payroll_show_payments",
+                [row.slip_id]
+            );
+            if (action) {
+                await this.action.doAction(action);
+            }
+        } catch (error) {
+            const message = error.data?.message || error.message ||
+                "Unable to open payments linked to this payslip.";
+            this.notification.add(message, {
+                type: "danger",
+                title: "Show Payment",
+            });
+        }
+    }
+
 }
 
 registry.category("actions").add(
