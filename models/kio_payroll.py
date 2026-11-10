@@ -65,6 +65,15 @@ class KioPayrollBatch(models.Model):
             batch.employee_count = len(slips.mapped("employee_id"))
             batch.total_net = sum(slips.mapped("net_pay"))
 
+    def get_payroll_report_totals(self):
+        self.ensure_one()
+        totals = {"paid": 0.0, "unpaid": 0.0}
+        for slip in self.payslip_ids:
+            payment_info = slip._get_kio_salary_payment_info()
+            totals["paid"] += payment_info["paid_amount"]
+            totals["unpaid"] += payment_info["unpaid_amount"]
+        return totals
+
     @api.constrains("date_start", "date_end")
     def _check_dates(self):
         for batch in self:
@@ -629,6 +638,22 @@ class KioPayrollPayslip(models.Model):
                 "Please update the KIO Payroll Overview Extension module."
             ))
         return report.report_action(slip)
+
+    @api.model
+    def action_payroll_download_batch_report(self, batch_id):
+        """Download the PDF summary for one authorized payroll batch."""
+        self._check_payroll_overview_manager()
+        batch = self._get_authorized_payroll_batch(batch_id)
+        report = self.env.ref(
+            "kio_payroll_overview_extension.action_report_payroll_batch",
+            raise_if_not_found=False,
+        )
+        if not report:
+            raise UserError(_(
+                "The Payroll Batch PDF report is unavailable. Update the "
+                "KIO Payroll Overview Extension module."
+            ))
+        return report.report_action(batch)
 
     @api.model
     def action_payroll_show_payments(self, slip_id):

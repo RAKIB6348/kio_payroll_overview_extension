@@ -15,6 +15,7 @@
         "data/kio_overtime_cron.xml",
         "views/payroll_overview_views.xml",
         "views/payroll_report_views.xml",
+        "views/payroll_batch_report_views.xml",
         "views/kio_bonus_views.xml",
         "views/kio_bonus_type_views.xml",
         "views/kio_payroll_adjustment_views.xml",

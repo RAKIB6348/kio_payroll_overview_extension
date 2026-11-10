@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_report_payroll_batch" model="ir.actions.report">
+        <field name="name">Payroll Batch Summary</field>
+        <field name="model">kio.payroll.batch</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">kio_payroll_overview_extension.report_payroll_batch</field>
+        <field name="report_file">kio_payroll_overview_extension.report_payroll_batch</field>
+        <field name="print_report_name">'Payroll_Batch_' + (object.name or str(object.id)).replace(' ', '_')</field>
+        <field name="binding_model_id" ref="model_kio_payroll_batch"/>
+        <field name="binding_type">report</field>
+    </record>
+
+    <template id="report_payroll_batch">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="batch">
+                <t t-set="report_totals" t-value="batch.get_payroll_report_totals()"/>
+                <t t-call="web.external_layout">
+                    <div class="page">
+                        <div class="row mb-4">
+                            <div class="col-7">
+                                <h2>Payroll Batch Summary</h2>
+                                <div><strong t-esc="batch.name"/></div>
+                                <div t-esc="batch.company_id.display_name"/>
+                            </div>
+                            <div class="col-5 text-end">
+                                <div><strong>Period:</strong>
+                                    <span t-field="batch.date_start"/> – <span t-field="batch.date_end"/>
+                                </div>
+                                <div><strong>Payment Date:</strong> <span t-field="batch.payment_date"/></div>
+                                <div><strong>Status:</strong>
+                                    <span t-esc="dict(batch._fields['state'].selection).get(batch.state, batch.state)"/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>Payslip Reference</th>
+                                    <th>Department</th>
+                                    <th class="text-end">Basic</th>
+                                    <th class="text-end">Allowance</th>
+                                    <th class="text-end">Overtime</th>
+                                    <th class="text-end">Bonus</th>
+                                    <th class="text-end">Deduction</th>
+                                    <th class="text-end">Net Pay</th>
+                                    <th class="text-end">Paid</th>
+                                    <th class="text-end">Unpaid</th>
+                                    <th>Payment Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr t-foreach="batch.payslip_ids.sorted(key=lambda s: (s.employee_id.name or '', s.id))" t-as="slip">
+                                    <t t-set="payment_info" t-value="slip._get_kio_salary_payment_info()"/>
+                                    <td t-esc="slip.employee_id.display_name"/>
+                                    <td t-esc="slip.number or slip.name"/>
+                                    <td t-esc="slip.employee_id.department_id.display_name or '-'"/>
+                                    <td class="text-end"><span t-out="slip.basic_salary" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end"><span t-out="slip.allowance" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end"><span t-out="slip.overtime" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end"><span t-out="slip.bonus" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end"><span t-out="slip.deduction" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end fw-bold"><span t-out="slip.net_pay" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end"><span t-out="payment_info['paid_amount']" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td class="text-end"><span t-out="payment_info['unpaid_amount']" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></td>
+                                    <td t-esc="dict([('paid', 'Paid'), ('partial', 'Partially Paid'), ('unpaid', 'Unpaid')]).get(payment_info['payment_state'])"/>
+                                </tr>
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <th colspan="8" class="text-end">Batch Total</th>
+                                    <th class="text-end"><span t-out="batch.total_net" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></th>
+                                    <th class="text-end"><span t-out="report_totals['paid']" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></th>
+                                    <th class="text-end"><span t-out="report_totals['unpaid']" t-options="{'widget': 'monetary', 'display_currency': batch.currency_id}"/></th>
+                                    <th/>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </t>
+            </t>
+        </t>
+    </template>
+</odoo>

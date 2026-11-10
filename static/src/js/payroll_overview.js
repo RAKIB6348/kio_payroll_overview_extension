@@ -868,6 +868,26 @@ export class PayrollBatchDetails extends Component {
         );
     }
 
+    async downloadBatchReport() {
+        try {
+            const action = await this.orm.call(
+                "kio.payroll.payslip",
+                "action_payroll_download_batch_report",
+                [this.batchId]
+            );
+            if (action) {
+                await this.action.doAction(action);
+            }
+        } catch (error) {
+            const message = error.data?.message || error.message ||
+                "Unable to download the payroll batch PDF.";
+            this.notification.add(message, {
+                type: "danger",
+                title: "Payroll Batch PDF",
+            });
+        }
+    }
+
     async openPayNow(row) {
         return this.onPayNow(row);
     }
