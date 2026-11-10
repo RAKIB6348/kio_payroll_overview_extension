@@ -627,6 +627,34 @@ class KioPayrollPayslip(models.Model):
         return {cfg.employee_id.id: cfg for cfg in configs}
 
     @api.model
+    def _get_contract_total_allowance(self, contract, currency=None):
+        """Return the applicable contract's total allowance.
+
+        Uses the employee contract as the source of truth. When the module's
+        computed contract total is available, it is used to avoid duplicating
+        allowance logic. Historical payslips store generated amounts in lines
+        and are not recomputed from current contract values.
+        """
+        if not contract:
+            return 0.0
+        currency = currency or contract.currency_id or contract.company_id.currency_id
+        if "kio_total_allowance" in contract._fields:
+            amount = contract.kio_total_allowance or 0.0
+        else:
+            hra = (contract.wage or 0.0) * (
+                getattr(contract, "kio_house_rent_allowance_percent", 0.0) or 0.0
+            ) / 100.0
+            amount = (
+                hra
+                + (getattr(contract, "kio_medical_allowance", 0.0) or 0.0)
+                + (getattr(contract, "kio_conveyance_allowance", 0.0) or 0.0)
+                + (getattr(contract, "kio_food_allowance", 0.0) or 0.0)
+                + (getattr(contract, "kio_mobile_allowance", 0.0) or 0.0)
+                + (getattr(contract, "kio_transport_allowance", 0.0) or 0.0)
+            )
+        return currency.round(amount) if currency else amount
+
+    @api.model
     def _get_employee_contracts(self, employees, company, date_start, date_end):
         """Return eligible running contracts per employee for the period.
 
@@ -887,8 +915,8 @@ class KioPayrollPayslip(models.Model):
                 invalid_wage_count += 1
                 continue
 
-            cfg = configs.get(employee.id)
-            allowance = (cfg.allowance or 0.0) if cfg else 0.0
+            # Basic and allowances come from the applicable running contract.
+            allowance = self._get_contract_total_allowance(contract, currency)
             overtime = overtime_amounts.get(employee.id, 0.0) or 0.0
             commission = commission_amounts.get(employee.id, 0.0) or 0.0
             bonus = pending_bonuses.get(employee.id, 0.0) or 0.0
@@ -1000,11 +1028,20 @@ class KioPayrollPayslip(models.Model):
     def _prepare_payslip_lines(
         self, employee, cfg=None, bonus_amount=0.0, basic=None, allowance=None,
         overtime_amount=0.0, commission_amount=0.0, deduction_amount=0.0,
+        contract=None, company=None,
     ):
         if basic is None:
-            basic = (cfg.basic_salary or 0.0) if cfg else 0.0
+            basic = contract.wage if contract and contract.wage else (
+                (cfg.basic_salary or 0.0) if cfg else 0.0
+            )
         if allowance is None:
-            allowance = (cfg.allowance or 0.0) if cfg else 0.0
+            if contract:
+                currency = (company or contract.company_id or self.env.company).currency_id
+                allowance = self._get_contract_total_allowance(contract, currency)
+            else:
+                # Contract allowances are the payroll source of truth. Legacy
+                # salary-config allowance is intentionally not added here.
+                allowance = 0.0
         overtime = overtime_amount or 0.0
         commission = commission_amount or 0.0
         bonus = bonus_amount or 0.0
@@ -1119,6 +1156,9 @@ class KioPayrollPayslip(models.Model):
         for employee in employees:
             cfg = configs.get(employee.id)
             contract = contracts[employee.id]
+            contract_allowance = self._get_contract_total_allowance(
+                contract, company.currency_id
+            )
             payslip_vals.append({
                 "name": _("Payslip - %s") % employee.display_name,
                 "batch_id": batch.id,
@@ -1132,10 +1172,12 @@ class KioPayrollPayslip(models.Model):
                     cfg,
                     bonus_amount=bonus_amounts.get(employee.id, 0.0),
                     basic=contract.wage or 0.0,
-                    allowance=(cfg.allowance or 0.0) if cfg else 0.0,
+                    allowance=contract_allowance,
                     overtime_amount=overtime_amounts.get(employee.id, 0.0),
                     commission_amount=commission_amounts.get(employee.id, 0.0),
                     deduction_amount=deduction_amounts.get(employee.id, 0.0),
+                    contract=contract,
+                    company=company,
                 ),
             })
         slips = self.create(payslip_vals)
