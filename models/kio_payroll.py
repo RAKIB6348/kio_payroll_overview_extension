@@ -75,6 +75,18 @@ class KioPayrollPayslip(models.Model):
     _order = "date_from desc, id desc"
     _check_company_auto = True
 
+    # Contract allowance fields that make up an employee's payroll allowances.
+    # All of them are fixed monetary amounts on the running contract.
+    _CONTRACT_ALLOWANCE_FIELDS = (
+        "kio_house_rent_allowance",
+        "kio_medical_allowance",
+        "kio_conveyance_allowance",
+        "kio_food_allowance",
+        "kio_mobile_allowance",
+        "kio_transport_allowance",
+        "kio_other_allowance",
+    )
+
     name = fields.Char(required=True)
     number = fields.Char(copy=False, readonly=True)
     batch_id = fields.Many2one(
@@ -630,28 +642,20 @@ class KioPayrollPayslip(models.Model):
     def _get_contract_total_allowance(self, contract, currency=None):
         """Return the applicable contract's total allowance.
 
-        Uses the employee contract as the source of truth. When the module's
-        computed contract total is available, it is used to avoid duplicating
-        allowance logic. Historical payslips store generated amounts in lines
-        and are not recomputed from current contract values.
+        The employee's running contract is the single source of truth. All
+        seven allowance fields are fixed monetary amounts and are summed
+        exactly once; House Rent is never recomputed as a percentage of the
+        basic wage. Historical payslips keep the amounts stored in their
+        lines and are not recomputed from current contract values.
         """
         if not contract:
             return 0.0
         currency = currency or contract.currency_id or contract.company_id.currency_id
-        if "kio_total_allowance" in contract._fields:
-            amount = contract.kio_total_allowance or 0.0
-        else:
-            hra = (contract.wage or 0.0) * (
-                getattr(contract, "kio_house_rent_allowance_percent", 0.0) or 0.0
-            ) / 100.0
-            amount = (
-                hra
-                + (getattr(contract, "kio_medical_allowance", 0.0) or 0.0)
-                + (getattr(contract, "kio_conveyance_allowance", 0.0) or 0.0)
-                + (getattr(contract, "kio_food_allowance", 0.0) or 0.0)
-                + (getattr(contract, "kio_mobile_allowance", 0.0) or 0.0)
-                + (getattr(contract, "kio_transport_allowance", 0.0) or 0.0)
-            )
+        amount = sum(
+            (getattr(contract, field_name, 0.0) or 0.0)
+            for field_name in self._CONTRACT_ALLOWANCE_FIELDS
+            if field_name in contract._fields
+        )
         return currency.round(amount) if currency else amount
 
     @api.model

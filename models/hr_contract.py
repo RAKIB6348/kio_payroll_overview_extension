@@ -4,18 +4,18 @@ from odoo import api, fields, models
 class HrContract(models.Model):
     _inherit = "hr.contract"
 
-    # House Rent Allowance: percentage of Basic Wage
+    # Legacy percentage input, kept for backward compatibility only. Payroll
+    # allowances are fixed monetary amounts; this field is no longer used.
     kio_house_rent_allowance_percent = fields.Float(
-        string="House Rent Allowance (%)",
+        string="House Rent Allowance (%) (legacy)",
         digits=(16, 2),
         default=0.0,
     )
+    # House Rent Allowance: fixed monetary amount
     kio_house_rent_allowance = fields.Monetary(
         string="House Rent Allowance",
-        compute="_compute_kio_allowances",
-        store=True,
         currency_field="currency_id",
-        readonly=True,
+        default=0.0,
     )
 
     # Medical Allowance: fixed monetary amount
@@ -70,7 +70,7 @@ class HrContract(models.Model):
     @api.depends(
         "wage",
         "currency_id",
-        "kio_house_rent_allowance_percent",
+        "kio_house_rent_allowance",
         "kio_medical_allowance",
         "kio_conveyance_allowance",
         "kio_food_allowance",
@@ -82,25 +82,22 @@ class HrContract(models.Model):
         for contract in self:
             wage = contract.wage or 0.0
             currency = contract.currency_id or contract.company_id.currency_id
-            hra = wage * (contract.kio_house_rent_allowance_percent or 0.0) / 100.0
+            # All allowances are fixed monetary amounts; House Rent is not a
+            # percentage of the basic wage.
+            house_rent = contract.kio_house_rent_allowance or 0.0
             medical = contract.kio_medical_allowance or 0.0
             conveyance = contract.kio_conveyance_allowance or 0.0
             food = contract.kio_food_allowance or 0.0
             mobile = contract.kio_mobile_allowance or 0.0
             transport = contract.kio_transport_allowance or 0.0
             other = contract.kio_other_allowance or 0.0
-            total = hra + medical + conveyance + food + mobile + transport + other
+            total = (
+                house_rent + medical + conveyance + food + mobile + transport
+                + other
+            )
             gross = wage + total
             if currency:
-                hra = currency.round(hra)
-                medical = currency.round(medical)
-                conveyance = currency.round(conveyance)
-                food = currency.round(food)
-                mobile = currency.round(mobile)
-                transport = currency.round(transport)
-                other = currency.round(other)
                 total = currency.round(total)
                 gross = currency.round(gross)
-            contract.kio_house_rent_allowance = hra
             contract.kio_total_allowance = total
             contract.kio_gross_salary = gross

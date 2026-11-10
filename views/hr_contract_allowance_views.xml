@@ -7,10 +7,8 @@
         <field name="arch" type="xml">
             <xpath expr="//page[@name='information']//group[@name='salary']//div[@name='wage']" position="after">
                 <separator string="Allowances" colspan="2"/>
-                <field name="kio_house_rent_allowance_percent" string="House Rent Allowance (%)"/>
-
+                <field name="kio_house_rent_allowance" string="House Rent Allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="kio_medical_allowance" string="Medical Allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
-
                 <field name="kio_conveyance_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="kio_food_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="kio_mobile_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
