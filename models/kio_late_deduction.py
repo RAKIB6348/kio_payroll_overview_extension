@@ -292,11 +292,17 @@ class KioDeduction(models.Model):
                 return default
 
         enabled = bool(getattr(company, "kio_late_deduction_enabled", _bool("kio_payroll_overview_extension.late_deduction_enabled", False)))
-        buffer_minutes = max(0, int(getattr(company, "kio_late_buffer_minutes", _int("kio_payroll_overview_extension.late_buffer_minutes", 10)) or 0))
-        threshold = max(1, int(getattr(company, "kio_late_days_threshold", _int("kio_payroll_overview_extension.late_days_threshold", 3)) or 3))
-        deduction_days = float(getattr(company, "kio_late_salary_deduction_days", _float("kio_payroll_overview_extension.late_salary_deduction_days", 1.0)) or 1.0)
-        if deduction_days <= 0:
-            deduction_days = 1.0
+        buffer_minutes = max(0, int(getattr(company, "kio_late_buffer_minutes", _int("kio_payroll_overview_extension.late_buffer_minutes", 0)) or 0))
+        threshold = int(getattr(company, "kio_late_days_threshold", _int("kio_payroll_overview_extension.late_days_threshold", 0)) or 0)
+        deduction_days = float(getattr(company, "kio_late_salary_deduction_days", _float("kio_payroll_overview_extension.late_salary_deduction_days", 0.0)) or 0.0)
+        if enabled and threshold <= 0:
+            raise ValidationError(_(
+                "Late Days Threshold must be greater than 0 when late salary deduction is enabled."
+            ))
+        if enabled and deduction_days <= 0:
+            raise ValidationError(_(
+                "Salary Deduction Days must be greater than 0 when late salary deduction is enabled."
+            ))
         return {
             "enabled": enabled,
             "buffer_minutes": buffer_minutes,
