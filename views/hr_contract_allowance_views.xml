@@ -15,6 +15,7 @@
                 <field name="kio_food_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="kio_mobile_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
                 <field name="kio_transport_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                <field name="kio_other_allowance" widget="monetary" options="{'currency_field': 'currency_id'}"/>
             </xpath>
         </field>
     </record>

@@ -46,6 +46,11 @@ class HrContract(models.Model):
         currency_field="currency_id",
         default=0.0,
     )
+    kio_other_allowance = fields.Monetary(
+        string="Other Allowance",
+        currency_field="currency_id",
+        default=0.0,
+    )
 
     kio_total_allowance = fields.Monetary(
         string="Total Allowance",
@@ -71,6 +76,7 @@ class HrContract(models.Model):
         "kio_food_allowance",
         "kio_mobile_allowance",
         "kio_transport_allowance",
+        "kio_other_allowance",
     )
     def _compute_kio_allowances(self):
         for contract in self:
@@ -82,7 +88,8 @@ class HrContract(models.Model):
             food = contract.kio_food_allowance or 0.0
             mobile = contract.kio_mobile_allowance or 0.0
             transport = contract.kio_transport_allowance or 0.0
-            total = hra + medical + conveyance + food + mobile + transport
+            other = contract.kio_other_allowance or 0.0
+            total = hra + medical + conveyance + food + mobile + transport + other
             gross = wage + total
             if currency:
                 hra = currency.round(hra)
@@ -91,6 +98,7 @@ class HrContract(models.Model):
                 food = currency.round(food)
                 mobile = currency.round(mobile)
                 transport = currency.round(transport)
+                other = currency.round(other)
                 total = currency.round(total)
                 gross = currency.round(gross)
             contract.kio_house_rent_allowance = hra
