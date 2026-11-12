@@ -440,6 +440,7 @@ export class NewPayrollGeneration extends Component {
                 date_end: bounds.end,
             },
         });
+        this._lastDefaultPayrollName = this.state.form.name;
         onWillStart(async () => {
             await this.loadData();
             if (this.state.data) {
@@ -486,6 +487,20 @@ export class NewPayrollGeneration extends Component {
     getDefaultName(month, year) {
         const monthLabel = (this.months.find(([value]) => value === month) || [0, ""])[1];
         return `${monthLabel} ${year} Payroll`;
+    }
+
+    updateDefaultPayrollName() {
+        const form = this.state.form;
+        const department = this.state.departments.find(
+            (item) => item.id === Number(form.department_id)
+        );
+        const baseName = this.getDefaultName(this.state.month, this.state.year);
+        const nextName = form.payroll_scope === "department" && department
+            ? `${baseName} - ${department.name}` : baseName;
+        if (form.name === this._lastDefaultPayrollName) {
+            form.name = nextName;
+        }
+        this._lastDefaultPayrollName = nextName;
     }
 
     get filteredEmployees() {
@@ -577,11 +592,13 @@ export class NewPayrollGeneration extends Component {
 
     async onScopeChange() {
         this.state.form.department_id = "";
+        this.updateDefaultPayrollName();
         this.state.selectedEmployeeIds = [];
         await this.loadData();
     }
 
     async onDepartmentChange() {
+        this.updateDefaultPayrollName();
         this.state.selectedEmployeeIds = [];
         await this.loadData();
     }
@@ -591,7 +608,7 @@ export class NewPayrollGeneration extends Component {
         this.state.form.date_start = bounds.start;
         this.state.form.date_end = bounds.end;
         this.state.form.payment_date = bounds.end;
-        this.state.form.name = this.getDefaultName(this.state.month, this.state.year);
+        this.updateDefaultPayrollName();
         await this.loadData();
     }
 
@@ -732,7 +749,10 @@ export class NewPayrollGeneration extends Component {
                 "kio.payroll.payslip",
                 "generate_new_payroll_run",
                 [{
-                    name: form.name.trim(),
+                    name: form.name === this._lastDefaultPayrollName
+                        ? this.getDefaultName(this.state.month, this.state.year)
+                        : form.name.trim(),
+                    use_default_name: form.name === this._lastDefaultPayrollName,
                     payroll_type: form.payroll_type,
                     payroll_scope: form.payroll_scope,
                     department_id: Number(form.department_id) || false,

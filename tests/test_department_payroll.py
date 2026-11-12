@@ -40,8 +40,8 @@ class TestDepartmentPayroll(TransactionCase):
     def _preview(self, scope='all', department=False):
         return self.Payslip.get_new_payroll_run_data('2026-11-01', '2026-11-30', scope, department)
 
-    def _generate(self, employee, scope='all', department=False, start='2026-11-01', end='2026-11-30'):
-        values = {'name': 'Department test', 'payroll_type': 'monthly', 'payment_date': end,
+    def _generate(self, employee, scope='all', department=False, start='2026-11-01', end='2026-11-30', name='Department test'):
+        values = {'name': name, 'payroll_type': 'monthly', 'payment_date': end,
                   'date_start': start, 'date_end': end, 'employee_ids': employee.ids,
                   'payroll_scope': scope, 'department_id': department}
         with patch.object(type(self.Payslip), '_post_batch_salary_entry', return_value=self.env['account.move']):
@@ -91,6 +91,20 @@ class TestDepartmentPayroll(TransactionCase):
         self.assertFalse(historical.department_id)
         details = self.Payslip.get_payroll_batch_details(slip.batch_id.id)
         self.assertFalse(details['batch']['department'])
+
+    def test_generated_and_custom_batch_names(self):
+        default_name = 'November 2026 Payroll'
+        it_slip = self._generate(self.it_employee, 'department', self.it.id, name=default_name)
+        self.assertEqual(it_slip.batch_id.name, default_name + ' - IT')
+        self.assertEqual(self.Payslip.get_payroll_batch_details(it_slip.batch_id.id)['batch']['name'], it_slip.batch_id.name)
+        batches = self.Payslip.get_payroll_overview_data(11, 2026)['recent_batches']
+        self.assertEqual(next(batch['name'] for batch in batches if batch['id'] == it_slip.batch_id.id), it_slip.batch_id.name)
+        all_slip = self._generate(self.no_department, name=default_name)
+        self.assertEqual(all_slip.batch_id.name, default_name)
+        named_slip = self._generate(self.accounts_employee, 'department', self.accounts.id, name=default_name + ' - Accounts')
+        self.assertEqual(named_slip.batch_id.name, default_name + ' - Accounts')
+        custom_slip = self._generate(self.child_employee, 'department', self.child.id, name='Special management payroll')
+        self.assertEqual(custom_slip.batch_id.name, 'Special management payroll')
 
     def test_tampered_employee_and_empty_department(self):
         with self.assertRaises(ValidationError):

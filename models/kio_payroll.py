@@ -1239,6 +1239,11 @@ class KioPayrollPayslip(models.Model):
             raise ValidationError(_("Enter valid payroll dates."))
         if not name or not payment_date or not date_start or not date_end:
             raise ValidationError(_("Payroll name, payment date, start date, and end date are required."))
+        # Preserve manually entered names; only expand the standard generated name.
+        if (department and not name.endswith(" - %s" % department.name) and
+                (values.get("use_default_name") is True or
+                 name == "%s Payroll" % date_end.strftime("%B %Y"))):
+            name = "%s - %s" % (name, department.name)
         if payroll_type != "monthly":
             raise ValidationError(_("Unsupported payroll type."))
         if date_end < date_start:
