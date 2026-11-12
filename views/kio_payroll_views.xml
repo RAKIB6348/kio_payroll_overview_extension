@@ -54,6 +54,8 @@
                 <field name="name"/>
                 <field name="date_start"/>
                 <field name="date_end"/>
+                <field name="payroll_scope"/>
+                <field name="department_id"/>
                 <field name="payment_date"/>
                 <field name="employee_count"/>
                 <field name="total_net"/>
@@ -76,6 +78,8 @@
                         <group>
                             <field name="name"/>
                             <field name="payroll_type"/>
+                            <field name="payroll_scope" readonly="state != 'draft'"/>
+                            <field name="department_id" invisible="payroll_scope != 'department'" readonly="state != 'draft'" domain="[('company_id', '=', company_id)]"/>
                             <field name="payment_date"/>
                         </group>
                         <group>

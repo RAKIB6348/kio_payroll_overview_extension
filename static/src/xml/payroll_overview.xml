@@ -152,6 +152,10 @@
                                             </dd>
                                             <dt class="col-5 text-muted fw-normal">Payment Date</dt>
                                             <dd class="col-7 mb-0 text-end" t-esc="formatDate(batch.payment_date)"/>
+                                            <t t-if="batch.department">
+                                                <dt class="col-5 text-muted fw-normal">Department</dt>
+                                                <dd class="col-7 mb-0 text-end" t-esc="batch.department"/>
+                                            </t>
                                             <dt class="col-5 text-muted fw-normal">Total Employees</dt>
                                             <dd class="col-7 mb-0 text-end fw-semibold" t-esc="batch.total_employees"/>
                                             <dt class="col-5 text-muted fw-normal">Total Net Pay</dt>
@@ -444,6 +448,22 @@
                                                required="required" placeholder="November 2026 Payroll"
                                                t-model="state.form.name"/>
                                     </div>
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label fw-semibold" for="o_payroll_scope">Payroll Scope</label>
+                                            <select id="o_payroll_scope" class="form-select" t-model="state.form.payroll_scope" t-on-change="onScopeChange">
+                                                <option value="all">All Employees</option>
+                                                <option value="department">Department-wise</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-12 col-md-6" t-if="state.form.payroll_scope === 'department'">
+                                            <label class="form-label fw-semibold" for="o_payroll_department">Department</label>
+                                            <select id="o_payroll_department" class="form-select" t-model="state.form.department_id" t-on-change="onDepartmentChange">
+                                                <option value="">Select a department</option>
+                                                <option t-foreach="state.departments" t-as="department" t-key="department.id" t-att-value="department.id" t-esc="department.name"/>
+                                            </select>
+                                        </div>
+                                    </div>
                                     <div class="row g-3">
                                         <div class="col-12 col-md-6">
                                             <label class="form-label fw-semibold" for="o_new_payroll_type">
@@ -600,7 +620,7 @@
                                                 <input class="form-check-input" type="checkbox"
                                                        t-att-aria-label="'Select ' + row.name"
                                                        t-att-checked="isEmployeeSelected(row.employee_id)"
-                                                       t-att-disabled="!row.eligible"
+                                                       t-att-disabled="!row.eligible || row.has_existing_payslip"
                                                        t-att-title="row.eligible ? '' : 'No eligible contract and salary structure for this period'"
                                                        t-on-change="(event) => this.toggleEmployee(row.employee_id, event)"/>
                                             </td>
@@ -614,7 +634,7 @@
                                                         <div class="fw-bold text-truncate" t-esc="row.name"/>
                                                         <div class="text-muted small text-truncate">
                                                             <t t-esc="row.identification_id"/>
-                                                            <span t-if="row.has_existing_payslip" class="badge text-bg-info ms-1">Existing payslip</span>
+                                                            <span t-if="row.has_existing_payslip" class="badge text-bg-info ms-1">Already Generated</span>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -732,6 +752,10 @@
                                     <div class="mb-3">
                                         <label class="form-label text-muted small fw-semibold">Payroll Name</label>
                                         <div class="form-control bg-light" t-esc="state.data.batch.name"/>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted small fw-semibold">Payroll Scope</label>
+                                        <div class="form-control bg-light" t-esc="state.data.batch.department || 'All Employees'"/>
                                     </div>
                                     <div class="row g-3">
                                         <div class="col-12 col-md-6">

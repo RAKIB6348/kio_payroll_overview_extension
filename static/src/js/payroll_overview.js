@@ -428,16 +428,30 @@ export class NewPayrollGeneration extends Component {
             error: false,
             data: null,
             employees: [],
+            departments: [],
             selectedEmployeeIds: [],
             form: {
                 name: this.getDefaultName(month, year),
                 payroll_type: "monthly",
+                payroll_scope: "all",
+                department_id: "",
                 payment_date: bounds.end,
                 date_start: bounds.start,
                 date_end: bounds.end,
             },
         });
-        onWillStart(() => this.loadData());
+        onWillStart(async () => {
+            await this.loadData();
+            if (this.state.data) {
+                try {
+                    this.state.departments = await this.orm.searchRead(
+                        "hr.department", [["company_id", "=", this.state.data.company.id]], ["name"]
+                    );
+                } catch (error) {
+                    this.notification.add(error.data?.message || error.message, { type: "danger" });
+                }
+            }
+        });
         onWillUpdateProps(async (nextProps) => {
             const nextContext = nextProps.action?.context || {};
             const nextMonth = Number(nextContext.kio_payroll_month);
@@ -504,11 +518,22 @@ export class NewPayrollGeneration extends Component {
             && form.date_end
             && form.payment_date
             && form.date_end >= form.date_start
+            && (form.payroll_scope !== "department" || form.department_id)
         );
     }
 
     async loadData(selectEligible = true) {
         const { date_start: dateStart, date_end: dateEnd } = this.state.form;
+        const scope = this.state.form.payroll_scope;
+        const departmentId = Number(this.state.form.department_id) || false;
+        const requestId = this._payrollRequestId = (this._payrollRequestId || 0) + 1;
+        if (scope === "department" && !departmentId) {
+            this.state.employees = [];
+            this.state.selectedEmployeeIds = [];
+            if (this.state.data) this.state.data.employee_count = 0;
+            this.state.loading = false;
+            return;
+        }
         if (!dateStart || !dateEnd || dateEnd < dateStart) {
             this.state.loading = false;
             return;
@@ -519,15 +544,16 @@ export class NewPayrollGeneration extends Component {
             const data = await this.orm.call(
                 "kio.payroll.payslip",
                 "get_new_payroll_run_data",
-                [dateStart, dateEnd]
+                [dateStart, dateEnd, scope, departmentId]
             );
+            if (requestId !== this._payrollRequestId) return;
             const employees = Array.isArray(data.employees) ? data.employees : [];
             this.state.data = data;
             this.state.employees = employees;
             const eligibleIds = [
                 ...new Set(
                     employees
-                        .filter((row) => row.eligible)
+                        .filter((row) => row.eligible && !row.has_existing_payslip)
                         .map((row) => row.employee_id)
                 ),
             ];
@@ -537,6 +563,7 @@ export class NewPayrollGeneration extends Component {
                     (employeeId) => eligibleIds.includes(employeeId)
                 );
         } catch (error) {
+            if (requestId !== this._payrollRequestId) return;
             this.state.error = error.data?.message || error.message ||
                 "Unable to load employees for this payroll period.";
             this.notification.add(this.state.error, {
@@ -544,8 +571,19 @@ export class NewPayrollGeneration extends Component {
                 title: "New Payroll Run",
             });
         } finally {
-            this.state.loading = false;
+            if (requestId === this._payrollRequestId) this.state.loading = false;
         }
+    }
+
+    async onScopeChange() {
+        this.state.form.department_id = "";
+        this.state.selectedEmployeeIds = [];
+        await this.loadData();
+    }
+
+    async onDepartmentChange() {
+        this.state.selectedEmployeeIds = [];
+        await this.loadData();
     }
 
     async onMonthYearChange() {
@@ -579,7 +617,7 @@ export class NewPayrollGeneration extends Component {
     }
 
     selectableEmployees() {
-        return this.filteredEmployees.filter((row) => row.eligible);
+        return this.filteredEmployees.filter((row) => row.eligible && !row.has_existing_payslip);
     }
 
     areAllEmployeesSelected() {
@@ -696,6 +734,8 @@ export class NewPayrollGeneration extends Component {
                 [{
                     name: form.name.trim(),
                     payroll_type: form.payroll_type,
+                    payroll_scope: form.payroll_scope,
+                    department_id: Number(form.department_id) || false,
                     payment_date: form.payment_date,
                     date_start: form.date_start,
                     date_end: form.date_end,

@@ -21,6 +21,13 @@ class KioPayrollBatch(models.Model):
         default="monthly",
         required=True,
     )
+    payroll_scope = fields.Selection(
+        [("all", "All Employees"), ("department", "Department-wise")],
+        default="all", required=True, tracking=True,
+    )
+    department_id = fields.Many2one(
+        "hr.department", string="Department", check_company=True, ondelete="restrict",
+    )
     payment_date = fields.Date()
     company_id = fields.Many2one(
         "res.company",
@@ -79,6 +86,16 @@ class KioPayrollBatch(models.Model):
         for batch in self:
             if batch.date_start and batch.date_end and batch.date_end < batch.date_start:
                 raise ValidationError(_("The end date must be on or after the start date."))
+
+    @api.constrains("payroll_scope", "department_id", "company_id")
+    def _check_payroll_scope(self):
+        for batch in self:
+            if batch.payroll_scope == "department" and not batch.department_id:
+                raise ValidationError(_("Select a department for department-wise payroll."))
+            if batch.payroll_scope == "all" and batch.department_id:
+                raise ValidationError(_("All Employees payroll cannot have a department."))
+            if batch.department_id and batch.department_id.company_id != batch.company_id:
+                raise ValidationError(_("The department must belong to the payroll company."))
 
     def unlink(self):
         moves = self.mapped("salary_move_id")
@@ -971,8 +988,30 @@ class KioPayrollPayslip(models.Model):
         return Model.search(domain)
 
     @api.model
-    def get_new_payroll_run_data(self, date_start, date_end):
+    def _get_payroll_scope_department(self, payroll_scope, department_id):
+        if payroll_scope not in ("all", "department"):
+            raise ValidationError(_("Invalid payroll scope."))
+        if payroll_scope == "all":
+            if department_id:
+                raise ValidationError(_("All Employees payroll cannot have a department."))
+            return self.env["hr.department"]
+        try:
+            department_id = int(department_id)
+        except (TypeError, ValueError):
+            raise ValidationError(_("Select a valid department for department-wise payroll."))
+        if department_id <= 0:
+            raise ValidationError(_("Select a valid department for department-wise payroll."))
+        department = self.env["hr.department"].search([
+            ("id", "=", department_id), ("company_id", "=", self.env.company.id),
+        ], limit=1)
+        if not department:
+            raise AccessError(_("The department is unavailable for the current company."))
+        return department
+
+    @api.model
+    def get_new_payroll_run_data(self, date_start, date_end, payroll_scope="all", department_id=False):
         self._check_payroll_overview_manager()
+        department = self._get_payroll_scope_department(payroll_scope, department_id)
         try:
             date_start = fields.Date.to_date(date_start)
             date_end = fields.Date.to_date(date_end)
@@ -983,10 +1022,13 @@ class KioPayrollPayslip(models.Model):
 
         company = self.env.company
         currency = company.currency_id
-        employees = self.env["hr.employee"].search([
+        employee_domain = [
             ("company_id", "=", company.id),
             ("active", "=", True),
-        ], order="name, id")
+        ]
+        if department:
+            employee_domain.append(("department_id", "=", department.id))
+        employees = self.env["hr.employee"].search(employee_domain, order="name, id")
         configs = self._get_employee_salary_config(employees, company)
         contracts, ambiguous_employee_ids = self._get_employee_contracts(
             employees, company, date_start, date_end
@@ -1185,6 +1227,8 @@ class KioPayrollPayslip(models.Model):
         self._check_payroll_overview_manager()
         if not isinstance(values, dict):
             raise ValidationError(_("Payroll run data is invalid."))
+        payroll_scope = values.get("payroll_scope", "all")
+        department = self._get_payroll_scope_department(payroll_scope, values.get("department_id"))
         name = (values.get("name") or "").strip()
         payroll_type = values.get("payroll_type") or "monthly"
         try:
@@ -1207,7 +1251,12 @@ class KioPayrollPayslip(models.Model):
             raise ValidationError(_("Select at least one eligible employee."))
 
         company = self.env.company
-        employees = self.env["hr.employee"].browse(employee_ids).exists()
+        employee_domain = [("id", "in", employee_ids), ("company_id", "=", company.id), ("active", "=", True)]
+        if department:
+            employee_domain.append(("department_id", "=", department.id))
+        employees = self.env["hr.employee"].search(employee_domain)
+        if set(employees.ids) != set(employee_ids):
+            raise ValidationError(_("One or more selected employees are unavailable or do not belong to the selected payroll scope."))
         configs = self._get_employee_salary_config(employees, company)
         contracts, ambiguous_employee_ids = self._get_employee_contracts(
             employees, company, date_start, date_end
@@ -1256,6 +1305,8 @@ class KioPayrollPayslip(models.Model):
             "date_end": date_end,
             "payment_date": payment_date,
             "payroll_type": payroll_type,
+            "payroll_scope": payroll_scope,
+            "department_id": department.id or False,
             "company_id": company.id,
             "state": "done",
         })
@@ -1482,6 +1533,8 @@ class KioPayrollPayslip(models.Model):
             recent_batches.append({
                 "id": batch.id,
                 "name": batch.name,
+                "payroll_scope": batch.payroll_scope,
+                "department": batch.department_id.display_name or False,
                 "date_start": batch.date_start,
                 "date_end": batch.date_end,
                 "payment_date": batch.payment_date,
@@ -1683,6 +1736,8 @@ class KioPayrollPayslip(models.Model):
         batch_data = {
             "id": batch.id,
             "name": batch.name,
+            "payroll_scope": batch.payroll_scope,
+            "department": batch.department_id.display_name or False,
             "payroll_type": batch.payroll_type,
             "payroll_type_label": dict(batch._fields["payroll_type"].selection).get(batch.payroll_type, batch.payroll_type),
             "payment_date": batch.payment_date,
