@@ -1,5 +1,5 @@
 from odoo import _, api, fields, models
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 
 class KioBonus(models.Model):
@@ -132,7 +132,7 @@ class KioBonus(models.Model):
                 )
 
     def _get_eligible_employees(self):
-        """Return eligible employees and their salary configurations."""
+        """Return eligible employees and applicable contract wages."""
         self.ensure_one()
         if not self.bonus_date:
             raise UserError(_("Select a Bonus Date first."))
@@ -155,30 +155,46 @@ class KioBonus(models.Model):
                 raise UserError(_(
                     "All selected employees must belong to the bonus company."
                 ))
-            employees = self.employee_ids.filtered("active")
+            employees = self.env["hr.employee"].search([
+                ("id", "in", self.employee_ids.ids),
+                ("company_id", "=", company.id),
+                ("active", "=", True),
+            ])
         else:
             employees = self.env["hr.employee"].search([
                 ("company_id", "=", company.id),
                 ("active", "=", True),
             ])
 
-        configs = self.env["kio.payroll.salary.config"].search([
-            ("employee_id", "in", employees.ids),
-            ("company_id", "=", company.id),
-            ("active", "=", True),
-        ])
-        config_by_employee = {cfg.employee_id.id: cfg for cfg in configs}
-        eligible = employees.filtered(
-            lambda employee: employee.id in config_by_employee
-            and (config_by_employee[employee.id].basic_salary or 0.0) > 0
-        )
-        return eligible, config_by_employee
+        try:
+            contracts, ambiguous_ids = self.env["kio.payroll.payslip"]._get_employee_contracts(
+                employees, company, self.bonus_date, self.bonus_date
+            )
+        except AccessError:
+            if self.calculation_type != "fixed":
+                raise
+            # Fixed bonuses do not require contract access; leave snapshots empty.
+            contracts, ambiguous_ids = {}, set()
+        if self.calculation_type == "percentage" and ambiguous_ids:
+            names = employees.filtered(lambda employee: employee.id in ambiguous_ids).mapped("display_name")
+            raise UserError(_(
+                "Multiple overlapping running contracts were found for: %s. "
+                "Resolve the overlapping contracts before generating percentage bonuses."
+            ) % ", ".join(names))
+        wages = {
+            employee.id: max(contracts[employee.id].wage or 0.0, 0.0)
+            if employee.id in contracts else 0.0
+            for employee in employees
+        }
+        if self.calculation_type == "percentage":
+            employees = employees.filtered(lambda employee: wages[employee.id] > 0)
+        return employees, wages
 
-    def _get_bonus_amount(self, config):
-        """Return the bonus amount for one employee salary configuration."""
+    def _get_bonus_amount(self, wage):
+        """Return the bonus amount for one employee's contract wage."""
         self.ensure_one()
         if self.calculation_type == "percentage":
-            amount = (config.basic_salary or 0.0) * (self.percentage or 0.0) / 100.0
+            amount = wage * (self.percentage or 0.0) / 100.0
         else:
             amount = self.amount or 0.0
         return self.currency_id.round(amount)
@@ -190,7 +206,7 @@ class KioBonus(models.Model):
                 raise UserError(_(
                     "Employee bonus details can only be generated for a draft bonus."
                 ))
-            employees, config_by_employee = bonus._get_eligible_employees()
+            employees, wages = bonus._get_eligible_employees()
             if not employees:
                 raise UserError(_(
                     "No eligible employees were found for the selected bonus scope."
@@ -199,10 +215,8 @@ class KioBonus(models.Model):
             self.env["kio.bonus.line"].create([{
                 "bonus_id": bonus.id,
                 "employee_id": employee.id,
-                "basic_salary": config_by_employee[employee.id].basic_salary or 0.0,
-                "bonus_amount": bonus._get_bonus_amount(
-                    config_by_employee[employee.id]
-                ),
+                "basic_salary": wages[employee.id],
+                "bonus_amount": bonus._get_bonus_amount(wages[employee.id]),
             } for employee in employees])
         return True
 
