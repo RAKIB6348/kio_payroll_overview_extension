@@ -270,9 +270,9 @@ class KioOvertime(models.Model):
 
     @api.model
     def _get_applicable_wage(self, employee, day_date, company):
-        Contract = self.env.get("hr.contract")
-        if not Contract:
+        if "hr.contract" not in self.env:
             return 0.0, _("hr.contract is unavailable.")
+        Contract = self.env["hr.contract"]
         contract = Contract.search([
             ("employee_id", "=", employee.id),
             ("company_id", "=", company.id),

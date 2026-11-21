@@ -27,8 +27,8 @@ class TestKioPayrollAdjustmentIntegration(TransactionCase):
         })
         cls.start = date(2026, 11, 1)
         cls.end = date(2026, 11, 30)
-        cls.Contract = cls.env.get("hr.contract")
-        if cls.Contract:
+        if "hr.contract" in cls.env:
+            cls.Contract = cls.env["hr.contract"]
             cls.Contract.create({
                 "name": "Adj Contract",
                 "employee_id": cls.employee.id,

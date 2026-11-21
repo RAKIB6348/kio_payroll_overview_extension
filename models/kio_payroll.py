@@ -936,8 +936,10 @@ class KioPayrollPayslip(models.Model):
         Records already applied to a non-cancelled payslip are excluded when the
         model supports payroll-application tracking.
         """
-        Model = self.env.get(model_name)
-        if not Model or "state" not in Model._fields or "date" not in Model._fields:
+        if model_name not in self.env:
+            return {}
+        Model = self.env[model_name]
+        if "state" not in Model._fields or "date" not in Model._fields:
             return {}
         domain = [
             ("state", "=", "confirmed"),
@@ -972,9 +974,11 @@ class KioPayrollPayslip(models.Model):
 
         Used only for post-generation tracking (after successful payslip creation).
         """
-        Model = self.env.get(model_name)
-        if not Model or "state" not in Model._fields or "date" not in Model._fields:
-            return Model.browse() if Model else self.env["ir.model"]  # unreachable fallback
+        if model_name not in self.env:
+            return self.env["ir.model"].browse()
+        Model = self.env[model_name]
+        if "state" not in Model._fields or "date" not in Model._fields:
+            return Model.browse()
         domain = [
             ("state", "=", "confirmed"),
             ("company_id", "=", company.id),
@@ -1434,8 +1438,10 @@ class KioPayrollPayslip(models.Model):
 
     @api.model
     def _mark_adjustments_applied_for_slip(self, slip, model_name, amount_field=None):
-        Model = self.env.get(model_name)
-        if not Model or not slip or "applied" not in Model._fields:
+        if model_name not in self.env or not slip:
+            return
+        Model = self.env[model_name]
+        if "applied" not in Model._fields:
             return
         domain = [
             ("state", "=", "confirmed"),
